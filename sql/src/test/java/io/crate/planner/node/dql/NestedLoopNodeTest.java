@@ -19,72 +19,51 @@
  * software solely pursuant to the terms of the relevant commercial agreement.
  */
 
-package io.crate.planner.node;
+package io.crate.planner.node.dql;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
-import io.crate.metadata.FunctionIdent;
-import io.crate.metadata.FunctionInfo;
-import io.crate.operation.aggregation.impl.CountAggregation;
-import io.crate.planner.node.dql.MergeNode;
 import io.crate.planner.node.dql.join.NestedLoopNode;
-import io.crate.planner.projection.GroupProjection;
-import io.crate.planner.projection.Projection;
-import io.crate.planner.projection.TopNProjection;
-import io.crate.planner.symbol.Aggregation;
-import io.crate.planner.symbol.Reference;
-import io.crate.planner.symbol.Symbol;
 import io.crate.test.integration.CrateUnitTest;
-import io.crate.testing.TestingHelpers;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 import org.elasticsearch.common.io.stream.BytesStreamInput;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
+import org.hamcrest.core.Is;
 import org.junit.Test;
 
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 import java.util.UUID;
 
-import static org.hamcrest.core.Is.is;
+import static org.hamcrest.CoreMatchers.is;
 
-public class MergeNodeTest extends CrateUnitTest {
-
+public class NestedLoopNodeTest extends CrateUnitTest {
 
     @Test
     public void testSerialization() throws Exception {
-        Reference nameRef = TestingHelpers.createReference("name", DataTypes.STRING);
-        GroupProjection groupProjection = new GroupProjection();
-        groupProjection.keys(Collections.<Symbol>singletonList(nameRef));
-        groupProjection.values(Collections.singletonList(
-                Aggregation.finalAggregation(
-                        new FunctionInfo(new FunctionIdent(CountAggregation.NAME, ImmutableList.<DataType>of()), DataTypes.LONG),
-                        ImmutableList.<Symbol>of(),
-                        Aggregation.Step.PARTIAL)
-        ));
-        TopNProjection topNProjection = new TopNProjection(10, 0);
 
-        List<Projection> projections = Arrays.asList(groupProjection, topNProjection);
-        MergeNode node = new MergeNode(0, "merge", 2, Arrays.<DataType>asList(DataTypes.UNDEFINED, DataTypes.STRING), projections);
+        NestedLoopNode node = new NestedLoopNode(2, "nestedLoop");
         node.jobId(UUID.randomUUID());
         node.executionNodes(Sets.newHashSet("node1", "node2"));
+        node.leftInputTypes(Arrays.<DataType>asList(DataTypes.UNDEFINED, DataTypes.STRING));
+        node.rightInputTypes(Arrays.<DataType>asList(DataTypes.BOOLEAN, DataTypes.INTEGER, DataTypes.DOUBLE));
         node.downstreamNodes(Sets.newHashSet("node3", "node4"));
+        node.downstreamExecutionNodeId(5);
 
         BytesStreamOutput output = new BytesStreamOutput();
         node.writeTo(output);
 
-
         BytesStreamInput input = new BytesStreamInput(output.bytes());
-        MergeNode node2 = new MergeNode();
+        NestedLoopNode node2 = new NestedLoopNode();
         node2.readFrom(input);
 
         assertThat(node.downstreamExecutionNodeId(), is(node2.downstreamExecutionNodeId()));
         assertThat(node.downstreamNodes(), is(node2.downstreamNodes()));
-        assertThat(node.numUpstreams(), is(node2.numUpstreams()));
-        assertThat(node.executionNodes(), is(node2.executionNodes()));
-        assertThat(node.jobId(), is(node2.jobId()));
-        assertEquals(node.inputTypes(), node2.inputTypes());
+        assertThat(node.executionNodes(), Is.is(node2.executionNodes()));
+        assertThat(node.jobId(), Is.is(node2.jobId()));
+        assertThat(node.leftInputTypes(), is(node2.leftInputTypes()));
+        assertThat(node.rightInputTypes(), is(node2.rightInputTypes()));
         assertThat(node.executionNodeId(), is(node2.executionNodeId()));
+        assertThat(node.name(), is(node2.name()));
+        assertThat(node.outputTypes(), is(node2.outputTypes()));
     }
 }
