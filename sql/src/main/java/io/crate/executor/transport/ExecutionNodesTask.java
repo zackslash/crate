@@ -374,7 +374,7 @@ public class ExecutionNodesTask extends JobTask {
             for (final String nodeId : nodeIds) {
                 transportCloseContextNodeAction.execute(
                         nodeId,
-                        new NodeCloseContextRequest(node.jobId(), node.executionNodeId()),
+                        new NodeCloseContextRequest(node.jobId(), new int[]{node.executionNodeId()}),
                         new ActionListener<NodeCloseContextResponse>() {
 
                     @Override

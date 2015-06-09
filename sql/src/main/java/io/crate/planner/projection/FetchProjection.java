@@ -24,16 +24,15 @@ package io.crate.planner.projection;
 import com.carrotsearch.hppc.IntObjectOpenHashMap;
 import com.carrotsearch.hppc.cursors.IntObjectCursor;
 import io.crate.metadata.ReferenceInfo;
+import io.crate.metadata.TableIdent;
 import io.crate.planner.symbol.Symbol;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.index.shard.ShardId;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class FetchProjection extends Projection {
 
@@ -44,63 +43,45 @@ public class FetchProjection extends Projection {
         }
     };
 
-    private IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId;
-    private Symbol docIdSymbol;
-    private List<Symbol> inputSymbols;
+    private List<FetchRelation> fetchRelations;
     private List<Symbol> outputSymbols;
-    private List<ReferenceInfo> partitionBy;
-    private Map<Integer, List<String>> executionNodes;
+    private Set<String> executionNodes;
     private int bulkSize;
     private boolean closeContexts;
+    private IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId;
     private IntObjectOpenHashMap<String> jobSearchContextIdToNode;
     private IntObjectOpenHashMap<ShardId> jobSearchContextIdToShard;
 
     private FetchProjection() {
     }
 
-    public FetchProjection(IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId,
-                           Symbol docIdSymbol,
-                           List<Symbol> inputSymbols,
+    public FetchProjection(List<FetchRelation> fetchRelations,
                            List<Symbol> outputSymbols,
-                           List<ReferenceInfo> partitionBy,
-                           Map<Integer, List<String>> executionNodes,
+                           Set<String> executionNodes,
                            int bulkSize,
                            boolean closeContexts,
+                           IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId,
                            IntObjectOpenHashMap<String> jobSearchContextIdToNode,
                            IntObjectOpenHashMap<ShardId> jobSearchContextIdToShard) {
-        this.jobSearchContextIdToExecutionNodeId = jobSearchContextIdToExecutionNodeId;
-        this.docIdSymbol = docIdSymbol;
-        this.inputSymbols = inputSymbols;
+        this.fetchRelations = fetchRelations;
         this.outputSymbols = outputSymbols;
-        this.partitionBy = partitionBy;
         this.executionNodes = executionNodes;
         this.bulkSize = bulkSize;
         this.closeContexts = closeContexts;
+        this.jobSearchContextIdToExecutionNodeId = jobSearchContextIdToExecutionNodeId;
         this.jobSearchContextIdToNode = jobSearchContextIdToNode;
         this.jobSearchContextIdToShard = jobSearchContextIdToShard;
-    }
-
-    public IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId() {
-        return jobSearchContextIdToExecutionNodeId;
-    }
-
-    public Symbol docIdSymbol() {
-        return docIdSymbol;
-    }
-
-    public List<Symbol> inputSymbols() {
-        return inputSymbols;
     }
 
     public List<Symbol> outputSymbols() {
         return outputSymbols;
     }
 
-    public List<ReferenceInfo> partitionedBy() {
-        return partitionBy;
+    public List<FetchRelation> fetchRelations() {
+        return fetchRelations;
     }
 
-    public Map<Integer, List<String>> executionNodes() {
+    public Set<String> executionNodes() {
         return executionNodes;
     }
 
@@ -112,6 +93,9 @@ public class FetchProjection extends Projection {
         return closeContexts;
     }
 
+    public IntObjectOpenHashMap<Integer> jobSearchContextIdToExecutionNodeId() {
+        return jobSearchContextIdToExecutionNodeId;
+    }
 
     public IntObjectOpenHashMap<String> jobSearchContextIdToNode() {
         return jobSearchContextIdToNode;
@@ -147,21 +131,15 @@ public class FetchProjection extends Projection {
         if (bulkSize != that.bulkSize) return false;
         if (!jobSearchContextIdToExecutionNodeId.equals(that.jobSearchContextIdToExecutionNodeId)) return false;
         if (!executionNodes.equals(that.executionNodes)) return false;
-        if (!docIdSymbol.equals(that.docIdSymbol)) return false;
-        if (!inputSymbols.equals(that.inputSymbols)) return false;
         if (!outputSymbols.equals(that.outputSymbols)) return false;
-        if (!outputSymbols.equals(that.outputSymbols)) return false;
-        return partitionBy.equals(that.partitionBy);
+        return true;
     }
 
     @Override
     public int hashCode() {
         int result = super.hashCode();
         result = 31 * result + jobSearchContextIdToExecutionNodeId.hashCode();
-        result = 31 * result + docIdSymbol.hashCode();
-        result = 31 * result + inputSymbols.hashCode();
         result = 31 * result + outputSymbols.hashCode();
-        result = 31 * result + partitionBy.hashCode();
         result = 31 * result + executionNodes.hashCode();
         result = 31 * result + bulkSize;
         result = 31 * result + (closeContexts ? 1 : 0);
@@ -170,35 +148,24 @@ public class FetchProjection extends Projection {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        docIdSymbol = Symbol.fromStream(in);
-        int inputSymbolsSize = in.readVInt();
-        inputSymbols = new ArrayList<>(inputSymbolsSize);
-        for (int i = 0; i < inputSymbolsSize; i++) {
-            inputSymbols.add(Symbol.fromStream(in));
-        }
         int outputSymbolsSize = in.readVInt();
         outputSymbols = new ArrayList<>(outputSymbolsSize);
         for (int i = 0; i < outputSymbolsSize; i++) {
             outputSymbols.add(Symbol.fromStream(in));
         }
-        int partitionedBySize = in.readVInt();
-        partitionBy = new ArrayList<>(partitionedBySize);
-        for (int i = 0; i < partitionedBySize; i++) {
-            ReferenceInfo referenceInfo = new ReferenceInfo();
-            referenceInfo.readFrom(in);
-            partitionBy.add(referenceInfo);
+
+        int fetchRelationsSize = in.readVInt();
+        fetchRelations = new ArrayList<>(fetchRelationsSize);
+        for (int i = 0; i < fetchRelationsSize; i++) {
+            FetchRelation fetchRelation = new FetchRelation();
+            fetchRelation.readFrom(in);
+            fetchRelations.add(fetchRelation);
         }
 
         int collectNodesSize = in.readVInt();
-        executionNodes = new HashMap<>(collectNodesSize);
+        executionNodes = new HashSet<>(collectNodesSize);
         for (int i = 0; i < collectNodesSize; i++) {
-            Integer executionNodeId = in.readVInt();
-            int executionNodesSize = in.readVInt();
-            List<String> nodes = new ArrayList<>(executionNodesSize);
-            for (int j = 0; j < executionNodesSize; i++) {
-                nodes.add(in.readString());
-            }
-            executionNodes.put(executionNodeId, nodes);
+            executionNodes.add(in.readString());
         }
 
 
@@ -224,28 +191,19 @@ public class FetchProjection extends Projection {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        Symbol.toStream(docIdSymbol, out);
-        out.writeVInt(inputSymbols.size());
-        for (Symbol symbol : inputSymbols) {
-            Symbol.toStream(symbol, out);
-        }
         out.writeVInt(outputSymbols.size());
         for (Symbol symbol : outputSymbols) {
             Symbol.toStream(symbol, out);
         }
-        out.writeVInt(partitionBy.size());
-        for (ReferenceInfo referenceInfo : partitionBy) {
-            referenceInfo.writeTo(out);
+
+        out.writeVInt(fetchRelations.size());
+        for (FetchRelation fetchRelation : fetchRelations) {
+            fetchRelation.writeTo(out);
         }
 
         out.writeVInt(executionNodes.size());
-        for (Map.Entry<Integer, List<String>> executionNode : executionNodes.entrySet()) {
-            out.writeVInt(executionNode.getKey());
-            List<String> nodes = executionNode.getValue();
-            out.writeVInt(nodes.size());
-            for (String nodeId : nodes) {
-                out.writeString(nodeId);
-            }
+        for (String nodeId : executionNodes) {
+            out.writeString(nodeId);
         }
         out.writeVInt(bulkSize);
         out.writeBoolean(closeContexts);
@@ -264,6 +222,112 @@ public class FetchProjection extends Projection {
         for (IntObjectCursor<ShardId> entry : jobSearchContextIdToShard) {
             out.writeVInt(entry.key);
             entry.value.writeTo(out);
+        }
+    }
+
+    public static class FetchRelation implements Streamable {
+
+        private TableIdent tableIdent;
+        private int executionNodeId;
+        private Symbol docIdSymbol;
+        private List<Symbol> inputSymbols;
+        private List<ReferenceInfo> partitionBy;
+
+        private FetchRelation() {
+        }
+
+        public FetchRelation(TableIdent tableIdent,
+                             int executionNodeId,
+                             Symbol docIdSymbol,
+                             List<Symbol> inputSymbols,
+                             List<ReferenceInfo> partitionBy) {
+            this.tableIdent = tableIdent;
+            this.executionNodeId = executionNodeId;
+            this.docIdSymbol = docIdSymbol;
+            this.inputSymbols = inputSymbols;
+            this.partitionBy = partitionBy;
+        }
+
+        public TableIdent tableIdent() {
+            return tableIdent;
+        }
+
+        public int executionNodeId() {
+            return executionNodeId;
+        }
+
+        public Symbol docIdSymbol() {
+            return docIdSymbol;
+        }
+
+        public List<Symbol> inputSymbols() {
+            return inputSymbols;
+        }
+
+        public List<ReferenceInfo> partitionedBy() {
+            return partitionBy;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            FetchRelation that = (FetchRelation) o;
+
+            if (!tableIdent.equals(that.tableIdent)) return false;
+            if (!(executionNodeId == that.executionNodeId)) return false;
+            if (!docIdSymbol.equals(that.docIdSymbol)) return false;
+            if (!inputSymbols.equals(that.inputSymbols)) return false;
+            if (!partitionBy.equals(that.partitionBy)) return false;
+
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = tableIdent.hashCode();
+            result = 31 * result + executionNodeId;
+            result = 31 * result + docIdSymbol.hashCode();
+            result = 31 * result + inputSymbols.hashCode();
+            result = 31 * result + partitionBy.hashCode();
+            return result;
+        }
+
+        @Override
+        public void readFrom(StreamInput in) throws IOException {
+            tableIdent = TableIdent.fromStream(in);
+            executionNodeId = in.readVInt();
+            docIdSymbol = Symbol.fromStream(in);
+            int inputSymbolsSize = in.readVInt();
+            inputSymbols = new ArrayList<>(inputSymbolsSize);
+            for (int i = 0; i < inputSymbolsSize; i++) {
+                inputSymbols.add(Symbol.fromStream(in));
+            }
+            int partitionedBySize = in.readVInt();
+            partitionBy = new ArrayList<>(partitionedBySize);
+            for (int i = 0; i < partitionedBySize; i++) {
+                ReferenceInfo referenceInfo = new ReferenceInfo();
+                referenceInfo.readFrom(in);
+                partitionBy.add(referenceInfo);
+            }
+
+        }
+
+        @Override
+        public void writeTo(StreamOutput out) throws IOException {
+            tableIdent.writeTo(out);
+            out.writeVInt(executionNodeId);
+            Symbol.toStream(docIdSymbol, out);
+            out.writeVInt(inputSymbols.size());
+            for (Symbol symbol : inputSymbols) {
+                Symbol.toStream(symbol, out);
+            }
+            out.writeVInt(partitionBy.size());
+            for (ReferenceInfo referenceInfo : partitionBy) {
+                referenceInfo.writeTo(out);
+            }
+
         }
     }
 }

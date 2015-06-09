@@ -31,29 +31,33 @@ import java.util.UUID;
 public class NodeCloseContextRequest extends TransportRequest {
 
     private UUID jobId;
-    private int executionNodeId;
+    private int[] executionNodeIds;
 
     public NodeCloseContextRequest() {
     }
 
-    public NodeCloseContextRequest(UUID jobId, int executionNodeId) {
+    public NodeCloseContextRequest(UUID jobId, int[] executionNodeIds) {
         this.jobId = jobId;
-        this.executionNodeId = executionNodeId;
+        this.executionNodeIds = executionNodeIds;
     }
 
     public UUID jobId() {
         return jobId;
     }
 
-    public int executionNodeId() {
-        return executionNodeId;
+    public int[] executionNodeIds() {
+        return executionNodeIds;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         jobId = new UUID(in.readLong(), in.readLong());
-        executionNodeId = in.readVInt();
+        int size = in.readVInt();
+        executionNodeIds = new int[size];
+        for (int i = 0; i < size; i++) {
+            executionNodeIds[i] = in.readVInt();
+        }
     }
 
     @Override
@@ -61,6 +65,9 @@ public class NodeCloseContextRequest extends TransportRequest {
         super.writeTo(out);
         out.writeLong(jobId.getMostSignificantBits());
         out.writeLong(jobId.getLeastSignificantBits());
-        out.writeVInt(executionNodeId);
+        out.writeVInt(executionNodeIds.length);
+        for (int executionNodeId : executionNodeIds) {
+            out.writeVInt(executionNodeId);
+        }
     }
 }

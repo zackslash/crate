@@ -77,7 +77,7 @@ public class JobExecutionContext {
             }
         }
 
-        boolean isEmpty() {
+        public boolean isEmpty() {
             return subContexts.isEmpty();
         }
 

@@ -166,7 +166,7 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         );
         collectNode.keepContextForFetcher(true);
 
-        FetchProjection fetchProjection = getFetchProjection((DocTableInfo) characters, (List<Symbol>) collectSymbols, (List<Symbol>) outputSymbols, (CollectNode) collectNode, ctx);
+        FetchProjection fetchProjection = getFetchProjectionSingleRelation((DocTableInfo) characters, (List<Symbol>) collectSymbols, (List<Symbol>) outputSymbols, (CollectNode) collectNode, ctx);
 
         MergeNode localMergeNode = PlanNodeBuilder.localMerge(
                 ImmutableList.<Projection>of(fetchProjection),
@@ -214,7 +214,7 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         );
         collectNode.keepContextForFetcher(true);
 
-        FetchProjection fetchProjection = getFetchProjection(characters, collectSymbols, outputSymbols, collectNode, ctx);
+        FetchProjection fetchProjection = getFetchProjectionSingleRelation(characters, collectSymbols, outputSymbols, collectNode, ctx);
 
         MergeNode localMergeNode = PlanNodeBuilder.localMerge(
                 ImmutableList.<Projection>of(fetchProjection),
@@ -230,16 +230,24 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         assertThat(rows, contains(isRow(2, "Ford")));
     }
 
-    private FetchProjection getFetchProjection(DocTableInfo characters, List<Symbol> collectSymbols, List<Symbol> outputSymbols, CollectNode collectNode, Planner.Context ctx) {
-        Map<Integer, List<String>> executionNodes = new HashMap<>();
-        executionNodes.put(collectNode.executionNodeId(), new ArrayList<>(collectNode.executionNodes()));
+    private FetchProjection getFetchProjectionSingleRelation(DocTableInfo tableInfo,
+                                                             List<Symbol> collectSymbols,
+                                                             List<Symbol> outputSymbols,
+                                                             CollectNode collectNode,
+                                                             Planner.Context ctx) {
+        FetchProjection.FetchRelation fetchRelation = new FetchProjection.FetchRelation(
+                tableInfo.ident(),
+                collectNode.executionNodeId(),
+                new InputColumn(0, DataTypes.STRING),
+                collectSymbols,
+                tableInfo.partitionedByColumns());
         return new FetchProjection(
-                ctx.jobSearchContextIdToExecutionNodeId(),
-                new InputColumn(0, DataTypes.STRING), collectSymbols, outputSymbols,
-                characters.partitionedByColumns(),
-                executionNodes,
+                ImmutableList.of(fetchRelation),
+                outputSymbols,
+                collectNode.executionNodes(),
                 5,
                 false,
+                ctx.jobSearchContextIdToExecutionNodeId(),
                 ctx.jobSearchContextIdToNode(),
                 ctx.jobSearchContextIdToShard()
         );
@@ -280,7 +288,7 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         collectNode.projections(ImmutableList.<Projection>of(mergeProjection));
         collectNode.keepContextForFetcher(true);
 
-        FetchProjection fetchProjection = getFetchProjection(characters, collectSymbols, outputSymbols, collectNode, ctx);
+        FetchProjection fetchProjection = getFetchProjectionSingleRelation(characters, collectSymbols, outputSymbols, collectNode, ctx);
 
         MergeNode localMergeNode = PlanNodeBuilder.sortedLocalMerge(
                 ImmutableList.<Projection>of(fetchProjection),
@@ -355,7 +363,7 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         TopNProjection topN = new TopNProjection(2, TopN.NO_OFFSET);
         topN.outputs(Collections.<Symbol>singletonList(new InputColumn(0)));
 
-        FetchProjection fetchProjection = getFetchProjection(searchf, collectSymbols, Arrays.asList(id_ref, function), collectNode, ctx);
+        FetchProjection fetchProjection = getFetchProjectionSingleRelation(searchf, collectSymbols, Arrays.asList(id_ref, function), collectNode, ctx);
 
         MergeNode mergeNode = PlanNodeBuilder.localMerge(
                 ImmutableList.of(topN, fetchProjection),
@@ -392,7 +400,7 @@ public class TransportExecutorTest extends BaseTransportExecutorTest {
         );
         collectNode.keepContextForFetcher(true);
 
-        FetchProjection fetchProjection = getFetchProjection(parted, collectSymbols, outputSymbols, collectNode, ctx);
+        FetchProjection fetchProjection = getFetchProjectionSingleRelation(parted, collectSymbols, outputSymbols, collectNode, ctx);
 
         MergeNode localMergeNode = PlanNodeBuilder.localMerge(
                 ImmutableList.<Projection>of(fetchProjection),

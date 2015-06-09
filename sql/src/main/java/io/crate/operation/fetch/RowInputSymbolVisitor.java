@@ -24,12 +24,16 @@ package io.crate.operation.fetch;
 import io.crate.core.collections.Row;
 import io.crate.metadata.Functions;
 import io.crate.metadata.ReferenceInfo;
+import io.crate.metadata.TableIdent;
 import io.crate.operation.AbstractImplementationSymbolVisitor;
 import io.crate.operation.Input;
 import io.crate.planner.RowGranularity;
 import io.crate.planner.symbol.Reference;
+import io.crate.planner.symbol.Symbol;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -37,43 +41,55 @@ public class RowInputSymbolVisitor extends AbstractImplementationSymbolVisitor<R
 
     public static class Context extends AbstractImplementationSymbolVisitor.Context {
 
-        private int inputIndex = 0;
-        private Row row;
-        private List<Reference> references = new ArrayList<>();
+        private final List<Reference> fetchReferences = new ArrayList<>();
 
+        private Row row;
         private Row partitionByRow;
         private List<ReferenceInfo> partitionedBy;
+        private int inputIndex = 0;
+        private TableIdent tableIdent;
 
-        public void row(Row row) {
+        private Context() {
+        }
+
+        public Context(Row row,
+                       Row partitionByRow,
+                       List<ReferenceInfo> partitionedBy,
+                       TableIdent tableIdent) {
             this.row = row;
-        }
-
-        public void partitionedBy(List<ReferenceInfo> partitionedBy) {
+            this.partitionByRow = partitionByRow;
             this.partitionedBy = partitionedBy;
+            this.tableIdent = tableIdent;
         }
 
-        public void partitionByRow(Row row) {
-            this.partitionByRow = row;
+        public void tableIdent(TableIdent tableIdent) {
+            this.tableIdent = tableIdent;
         }
 
-        public List<Reference> references() {
-            return references;
+        public List<Reference> fetchReferences() {
+            return fetchReferences;
         }
 
+        @Nullable
         public Input<?> allocateInput(Reference reference) {
+            assert tableIdent != null : "tableIdent must be set first";
+            if (!tableIdent.equals(reference.ident().tableIdent())) {
+                // reference does not belong to this table
+                return null;
+            }
             if (reference.info().granularity() == RowGranularity.PARTITION) {
                 return allocatePartitionedInput(reference.info());
             }
-            int idx = references.indexOf(reference);
+            int idx = fetchReferences.indexOf(reference);
             if (idx > -1) {
                 return new RowInput(row, idx);
             } else {
-                references.add(reference);
+                fetchReferences.add(reference);
                 return new RowInput(row, inputIndex++);
             }
         }
 
-        public Input<?> allocatePartitionedInput(ReferenceInfo referenceInfo) {
+        private Input<?> allocatePartitionedInput(ReferenceInfo referenceInfo) {
             assert partitionedBy != null : "partitionedBy must be set first";
             int idx = partitionedBy.indexOf(referenceInfo);
             if (idx > -1) {
@@ -84,7 +100,7 @@ public class RowInputSymbolVisitor extends AbstractImplementationSymbolVisitor<R
         }
     }
 
-    static class RowInput implements Input<Object> {
+    public static class RowInput implements Input<Object> {
 
         private final Row row;
         private final int index;
@@ -109,6 +125,17 @@ public class RowInputSymbolVisitor extends AbstractImplementationSymbolVisitor<R
         return new Context();
     }
 
+    public Context extractImplementations(Collection<? extends Symbol> symbols,
+                                          TableIdent tableIdent) {
+        Context context = newContext();
+        context.tableIdent(tableIdent);
+        for (Symbol symbol : symbols) {
+            context.add(process(symbol, context));
+        }
+        return context;
+    }
+
+    @Nullable
     @Override
     public Input<?> visitReference(Reference symbol, Context context) {
         return context.allocateInput(symbol);

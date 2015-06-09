@@ -188,14 +188,17 @@ public class QueryThenFetchConsumer implements Consumer {
                 Map<Integer, ArrayList<String>> nodeIds;
 
                 // TODO: create FetchProjectionBuilder
+                FetchProjection.FetchRelation fetchRelation = new FetchProjection.FetchRelation(
+                        tableInfo.ident(), collectNode.executionNodeId(),
+                        DEFAULT_DOC_ID_INPUT_COLUMN, collectSymbols,
+                        tableInfo.partitionedByColumns());
                 FetchProjection fetchProjection = new FetchProjection(
-                        context.plannerContext().jobSearchContextIdToExecutionNodeId(),
-                        DEFAULT_DOC_ID_INPUT_COLUMN, collectSymbols, outputSymbols,
-                        tableInfo.partitionedByColumns(),
-                        new HashMap<Integer, List<String>>(){{
-                            put(collectNode.executionNodeId(), new ArrayList<>(collectNode.executionNodes()));}},
+                        ImmutableList.of(fetchRelation),
+                        outputSymbols,
+                        collectNode.executionNodes(),
                         bulkSize,
                         querySpec.isLimited(),
+                        context.plannerContext().jobSearchContextIdToExecutionNodeId(),
                         context.plannerContext().jobSearchContextIdToNode(),
                         context.plannerContext().jobSearchContextIdToShard()
                 );

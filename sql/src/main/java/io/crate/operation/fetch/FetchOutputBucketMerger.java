@@ -28,43 +28,46 @@ import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.RowUpstream;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Merge multiple upstream buckets, whereas every row is ordered by a positional unique integer.
  * Emits rows as soon as possible. Buckets from one upstream can be consumed in an undefined
- * order. The main purpose of this implementation is merging ordered node responses.
+ * order. The main purpose of this implementation is merging ordered node fetch responses.
  */
-public class PositionalBucketMerger implements RowUpstream {
+public class FetchOutputBucketMerger implements RowUpstream {
 
     private RowDownstreamHandle downstream;
     private final AtomicInteger upstreamsRemaining = new AtomicInteger(0);
-    private final int orderingColumnIndex;
     private final UpstreamBucket[] remainingBuckets;
+    private volatile boolean consumeBuckets = true;
+    private final MultiRelationRow outputRow;
+    private final Map<Integer, Integer> upstreamIdToRelationId;
     private volatile int outputCursor = 0;
     private volatile int leastBucketCursor = -1;
     private volatile int leastBucketId = -1;
-    private final AtomicBoolean consumeBuckets = new AtomicBoolean(true);
 
-    public PositionalBucketMerger(RowDownstream downstream,
-                                  int numUpstreams,
-                                  int orderingColumnIndex) {
+    public FetchOutputBucketMerger(RowDownstream downstream,
+                                   int numUpstreams,
+                                   MultiRelationRow outputRow,
+                                   Map<Integer, Integer> upstreamIdToRelationId) {
         downstream(downstream);
-        this.orderingColumnIndex = orderingColumnIndex;
         remainingBuckets = new UpstreamBucket[numUpstreams];
+        this.outputRow = outputRow;
+        this.upstreamIdToRelationId = upstreamIdToRelationId;
     }
 
     public synchronized boolean setNextBucket(List<Row> bucket, int upstreamId) {
-        if (!consumeBuckets.get()) {
+        if (!consumeBuckets) {
             return false;
         }
         Iterator<Row> bucketIt = bucket.iterator();
         while (bucketIt.hasNext()) {
             Row firstRow = bucketIt.next();
-            if ((int)firstRow.get(orderingColumnIndex) == outputCursor) {
+            if ((int)firstRow.get(firstRow.size()) == outputCursor && !outputRow.isFinished()) {
+                outputRow.row(upstreamIdToRelationId.get(upstreamId), firstRow);
                 bucketIt.remove();
-                if (!emitRow(firstRow)) {
+                if (!emitCurrentRow()) {
                     return false;
                 }
             } else {
@@ -87,7 +90,7 @@ public class PositionalBucketMerger implements RowUpstream {
             int idx = 0;
             while(bucketIt.hasNext()) {
                 Row row = bucketIt.next();
-                int compare = Integer.compare((int) row.get(orderingColumnIndex), (int) newFirstRow.get(orderingColumnIndex));
+                int compare = Integer.compare((int) row.get(row.size()), (int) newFirstRow.get(newFirstRow.size()));
                 if (compare == 1) {
                     remainingBucket.addAll(idx, newBucket);
                     return;
@@ -106,8 +109,9 @@ public class PositionalBucketMerger implements RowUpstream {
             findLeastBucketIt();
         }
 
-        while (leastBucketCursor == outputCursor && leastBucketId != -1) {
-            if (!emitRow(remainingBuckets[leastBucketId].poll())) {
+        while (leastBucketCursor == outputCursor && leastBucketId != -1 && !outputRow.isFinished()) {
+            outputRow.row(upstreamIdToRelationId.get(leastBucketId), remainingBuckets[leastBucketId].poll());
+            if (!emitCurrentRow()) {
                 return false;
             }
             if (upstreamsRemaining.get() > 0) {
@@ -119,6 +123,8 @@ public class PositionalBucketMerger implements RowUpstream {
     }
 
     private void findLeastBucketIt() {
+        int leastBucketIdLocal = leastBucketId;
+        int leastBucketCursorLocal = leastBucketCursor;
         for (int i = 0; i < remainingBuckets.length; i++) {
             UpstreamBucket bucketIt = remainingBuckets[i];
             if (bucketIt == null || bucketIt.size() == 0) {
@@ -126,7 +132,7 @@ public class PositionalBucketMerger implements RowUpstream {
             }
             try {
                 Row row = bucketIt.getFirst();
-                int orderingValue = (int)row.get(orderingColumnIndex);
+                int orderingValue = (int)row.get(row.size());
                 if (orderingValue == outputCursor) {
                     leastBucketCursor = orderingValue;
                     leastBucketId = i;
@@ -139,11 +145,21 @@ public class PositionalBucketMerger implements RowUpstream {
                 // continue
             }
         }
+        if (leastBucketCursorLocal == leastBucketCursor && leastBucketIdLocal == leastBucketId) {
+            // no new least row was found
+            leastBucketId = -1;
+            leastBucketCursor = -1;
+        }
     }
 
-    private boolean emitRow(Row row) {
-        outputCursor++;
-        return downstream.setNextRow(row);
+    private boolean emitCurrentRow() {
+        boolean success = true;
+        if (outputRow.isFinished()) {
+            outputCursor++;
+            success = downstream.setNextRow(outputRow);
+            outputRow.reset();
+        }
+        return success;
     }
 
 
@@ -151,7 +167,7 @@ public class PositionalBucketMerger implements RowUpstream {
         this.downstream = downstream.registerUpstream(this);
     }
 
-    public PositionalBucketMerger registerUpstream(RowUpstream upstream) {
+    public FetchOutputBucketMerger registerUpstream(RowUpstream upstream) {
         upstreamsRemaining.incrementAndGet();
         return this;
     }
@@ -163,7 +179,7 @@ public class PositionalBucketMerger implements RowUpstream {
     }
 
     public void fail(Throwable throwable) {
-        consumeBuckets.set(false);
+        consumeBuckets = false;
         downstream.fail(throwable);
     }
 

@@ -330,23 +330,33 @@ public class ProjectionToProjectorVisitor
     @Override
     public Projector visitFetchProjection(FetchProjection projection, Context context) {
 
-        ImplementationSymbolVisitor.Context ctxDocId = new ImplementationSymbolVisitor.Context();
-        symbolVisitor.process(projection.docIdSymbol(), ctxDocId);
-        assert ctxDocId.collectExpressions().size() == 1;
+        List<FetchProjector.FetchRelation> fetchRelations = new ArrayList<>(projection.fetchRelations().size());
+        for (FetchProjection.FetchRelation projectionFetchRelation : projection.fetchRelations()) {
+            ImplementationSymbolVisitor.Context ctxDocId = new ImplementationSymbolVisitor.Context();
+            symbolVisitor.process(projectionFetchRelation.docIdSymbol(), ctxDocId);
+            assert ctxDocId.collectExpressions().size() == 1;
+
+            FetchProjector.FetchRelation fetchRelation = new FetchProjector.FetchRelation(
+                    symbolVisitor.functions(),
+                    projectionFetchRelation.tableIdent(),
+                    projectionFetchRelation.executionNodeId(),
+                    ctxDocId.collectExpressions().iterator().next(),
+                    projectionFetchRelation.inputSymbols(),
+                    projectionFetchRelation.partitionedBy()
+            );
+            fetchRelations.add(fetchRelation);
+        }
 
         return new FetchProjector(
                 transportActionProvider.transportFetchNodeAction(),
                 transportActionProvider.transportCloseContextNodeAction(),
-                symbolVisitor.functions(),
                 context.jobId,
-                projection.jobSearchContextIdToExecutionNodeId(),
-                ctxDocId.collectExpressions().iterator().next(),
-                projection.inputSymbols(),
+                fetchRelations,
                 projection.outputSymbols(),
-                projection.partitionedBy(),
+                projection.executionNodes(),
+                projection.jobSearchContextIdToExecutionNodeId(),
                 projection.jobSearchContextIdToNode(),
                 projection.jobSearchContextIdToShard(),
-                projection.executionNodes(),
                 projection.bulkSize(),
                 projection.closeContexts());
     }

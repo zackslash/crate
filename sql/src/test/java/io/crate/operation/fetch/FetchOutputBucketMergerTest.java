@@ -27,16 +27,16 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.SettableFuture;
 import io.crate.core.collections.Bucket;
 import io.crate.core.collections.Row;
+import io.crate.core.collections.RowDelegate;
 import io.crate.core.collections.RowN;
-import io.crate.testing.CollectingProjector;
+import io.crate.operation.Input;
 import io.crate.test.integration.CrateUnitTest;
+import io.crate.testing.CollectingProjector;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
 
-public class PositionalBucketMergerTest extends CrateUnitTest {
+public class FetchOutputBucketMergerTest extends CrateUnitTest {
 
     @Rule
     public ExpectedException expectedException = ExpectedException.none();
@@ -57,8 +57,16 @@ public class PositionalBucketMergerTest extends CrateUnitTest {
          */
         int numUpstreams = 2;
 
+        final RowDelegate rowDelegate = new RowDelegate();
+        MultiRelationRow outputRow = new MultiRelationRow(
+                ImmutableList.<Input<?>>of(new RowInputSymbolVisitor.RowInput(rowDelegate, 0)), 1);
+        Map<Integer, Integer> upstreamIdToRelationId = new HashMap<>(numUpstreams);
+        for (int i = 0; i < numUpstreams; i++) {
+            upstreamIdToRelationId.put(i, 0);
+        }
         CollectingProjector resultProvider = new CollectingProjector();
-        final PositionalBucketMerger bucketMerger = new PositionalBucketMerger(resultProvider, numUpstreams, 1);
+        final FetchOutputBucketMerger bucketMerger = new FetchOutputBucketMerger(
+                resultProvider, numUpstreams, outputRow, upstreamIdToRelationId);
 
         final List<List<List<Object[]>>> bucketsPerUpstream = new ArrayList<>(numUpstreams);
         List<List<Object[]>> upstream1 = new ArrayList<>(2);
@@ -84,7 +92,10 @@ public class PositionalBucketMergerTest extends CrateUnitTest {
                     public void run() {
                         List<Row> rows1 = new ArrayList<>();
                         for (Object[] row : bucket) {
-                            rows1.add(new PositionalRowDelegate(new RowN(row), (int) row[0]));
+                            synchronized (rowDelegate) {
+                                rowDelegate.delegate(new RowN(row));
+                                rows1.add(new PositionalRowDelegate(rowDelegate, (int) row[0]));
+                            }
                         }
                         try {
                             bucketMerger.setNextBucket(rows1, upstreamId);
@@ -127,11 +138,134 @@ public class PositionalBucketMergerTest extends CrateUnitTest {
     }
 
     @Test
+    public void testConcurrentSetNextBucketMultipleRelations() throws Exception {
+        /**
+         * Propagate 2 buckets of the same upstream concurrent, every bucket is ordered.
+         * Do all this for 2 relations.
+         */
+        // TODO: fix bugs which occurs if run with 1000 iterations
+        int numUpstreams = 2;
+        int numRelations = 2;
+
+        final RowDelegate rowDelegateFirstRelation = new RowDelegate();
+        final RowDelegate rowDelegateSecondRelation = new RowDelegate();
+        MultiRelationRow outputRow = new MultiRelationRow(
+                ImmutableList.<Input<?>>of(
+                        new RowInputSymbolVisitor.RowInput(rowDelegateFirstRelation, 0),
+                        new RowInputSymbolVisitor.RowInput(rowDelegateSecondRelation, 0)),
+                numRelations);
+        Map<Integer, Integer> upstreamIdToRelationId = new HashMap<>(numUpstreams);
+        for (int i = 0; i < numUpstreams * numRelations; i += numRelations) {
+            upstreamIdToRelationId.put(i, 0);
+            upstreamIdToRelationId.put(i+1, 1);
+        }
+        CollectingProjector resultProvider = new CollectingProjector();
+
+        final FetchOutputBucketMerger bucketMerger = new FetchOutputBucketMerger(
+                resultProvider, numUpstreams*numRelations, outputRow, upstreamIdToRelationId);
+
+        final List<List<List<Object[]>>> bucketsPerUpstream = new ArrayList<>(numUpstreams);
+        List<List<Object[]>> upstream1 = new ArrayList<>(2);
+        upstream1.add(ImmutableList.of(new Object[]{4}, new Object[]{6}, new Object[]{7}));
+        upstream1.add(ImmutableList.of(new Object[]{0}, new Object[]{1}, new Object[]{3}));
+        bucketsPerUpstream.add(upstream1);
+
+        List<List<Object[]>> upstream2 = new ArrayList<>(2);
+        upstream2.add(ImmutableList.of(new Object[]{4}, new Object[]{5}));
+        upstream2.add(ImmutableList.of(new Object[]{0}, new Object[]{3}));
+        bucketsPerUpstream.add(upstream2);
+
+        List<List<Object[]>> upstream3 = new ArrayList<>(2);
+        upstream3.add(ImmutableList.of(new Object[]{2}, new Object[]{5}));
+        upstream3.add(ImmutableList.of(new Object[]{8}, new Object[]{9}));
+        bucketsPerUpstream.add(upstream3);
+
+        List<List<Object[]>> upstream4 = new ArrayList<>(2);
+        upstream4.add(ImmutableList.of(new Object[]{2}, new Object[]{6}, new Object[]{7}));
+        upstream4.add(ImmutableList.of(new Object[]{1}, new Object[]{8}, new Object[]{9}));
+        bucketsPerUpstream.add(upstream4);
+
+        final List<Throwable> setNextRowExceptions = new ArrayList<>();
+        final CountDownLatch latch = new CountDownLatch(numUpstreams*2*numRelations);
+        final ExecutorService executorService = Executors.newScheduledThreadPool(numUpstreams);
+        for (int i = 0; i < bucketsPerUpstream.size(); i++) {
+            final int upstreamId = i;
+            final RowDelegate rowDelegate;
+            if (upstreamId % 2 == 0) {
+                rowDelegate = rowDelegateFirstRelation;
+            } else {
+                rowDelegate = rowDelegateSecondRelation;
+            }
+
+            for (final List<Object[]> bucket : bucketsPerUpstream.get(i)) {
+                bucketMerger.registerUpstream(null);
+                executorService.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        List<Row> rows = new ArrayList<>();
+                        for (Object[] row : bucket) {
+                            synchronized (rowDelegate) {
+                                rowDelegate.delegate(new RowN(row));
+                                rows.add(new PositionalRowDelegate(rowDelegate, (int) row[0]));
+                            }
+                        }
+                        try {
+                            bucketMerger.setNextBucket(rows, upstreamId);
+                        } catch (Exception e) {
+                            setNextRowExceptions.add(e);
+                        }
+                        bucketMerger.finish();
+                        latch.countDown();
+                    }
+                });
+            }
+        }
+        latch.await();
+        executorService.shutdown();
+        bucketMerger.finish();
+
+        assertThat(setNextRowExceptions, empty());
+
+        final SettableFuture<Bucket> results = SettableFuture.create();
+        Futures.addCallback(resultProvider.result(), new FutureCallback<Bucket>() {
+            @Override
+            public void onSuccess(Bucket result) {
+                results.set(result);
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                results.setException(t);
+            }
+        });
+
+        Bucket result = results.get();
+        assertThat(result.size(), is(10));
+        Iterator<Row> it = result.iterator();
+        for (int i = 0; i < 10; i++) {
+            Row row = it.next();
+            assertThat((int) row.get(0), is(i));
+            assertThat((int) row.get(1), is(i));
+        }
+
+        executorService.awaitTermination(1, TimeUnit.SECONDS);
+    }
+
+    @Test
     public void testOneUpstreamWillFail() throws Exception {
         int numUpstreams = 2;
 
+        final RowDelegate rowDelegate = new RowDelegate();
+        MultiRelationRow outputRow = new MultiRelationRow(
+                ImmutableList.<Input<?>>of(new RowInputSymbolVisitor.RowInput(rowDelegate, 0)), 1);
+        Map<Integer, Integer> upstreamIdToRelationId = new HashMap<>(numUpstreams);
+        for (int i = 0; i < numUpstreams; i++) {
+            upstreamIdToRelationId.put(i, 0);
+            upstreamIdToRelationId.put(i, 0);
+        }
         CollectingProjector resultProvider = new CollectingProjector();
-        final PositionalBucketMerger bucketMerger = new PositionalBucketMerger(resultProvider, numUpstreams, 1);
+        final FetchOutputBucketMerger bucketMerger = new FetchOutputBucketMerger(
+                resultProvider, numUpstreams, outputRow, upstreamIdToRelationId);
 
         final List<List<List<Object[]>>> bucketsPerUpstream = new ArrayList<>(numUpstreams);
         List<List<Object[]>> upstream1 = new ArrayList<>(2);
@@ -170,7 +304,10 @@ public class PositionalBucketMergerTest extends CrateUnitTest {
                     public void run() {
                         List<Row> rows1 = new ArrayList<>();
                         for (Object[] row : bucket) {
-                            rows1.add(new PositionalRowDelegate(new RowN(row), (int) row[0]));
+                            synchronized (rowDelegate) {
+                                rowDelegate.delegate(new RowN(row));
+                                rows1.add(new PositionalRowDelegate(rowDelegate, (int) row[0]));
+                            }
                         }
                         try {
                             bucketMerger.setNextBucket(rows1, upstreamId);
@@ -208,5 +345,4 @@ public class PositionalBucketMergerTest extends CrateUnitTest {
 
         executorService.awaitTermination(1, TimeUnit.SECONDS);
     }
-
 }

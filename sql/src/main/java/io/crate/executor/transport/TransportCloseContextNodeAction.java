@@ -94,22 +94,24 @@ public class TransportCloseContextNodeAction implements NodeAction<NodeCloseCont
     @Override
     public void nodeOperation(final NodeCloseContextRequest request,
                               final ActionListener<NodeCloseContextResponse> response) {
-        statsTables.operationStarted(request.executionNodeId(), request.jobId(), "closeContext");
-        try {
-            JobExecutionContext jobExecutionContext = jobContextService.getContextOrNull(request.jobId());
-            if (jobExecutionContext != null) {
-                ExecutionSubContext subContext = jobExecutionContext.getSubContextOrNull(request.executionNodeId());
-                if (subContext != null) {
-                    LOGGER.trace("Received CloseContextRequest, closing ExecutionSubContext {}/{}",
-                            request.jobId(), request.executionNodeId());
-                    subContext.close();
+        JobExecutionContext jobExecutionContext = jobContextService.getContextOrNull(request.jobId());
+        if (jobExecutionContext != null) {
+            for (int executionNodeId : request.executionNodeIds()) {
+                statsTables.operationStarted(executionNodeId, request.jobId(), "closeContext");
+                try {
+                    ExecutionSubContext subContext = jobExecutionContext.getSubContextOrNull(executionNodeId);
+                    if (subContext != null) {
+                        LOGGER.trace("Received CloseContextRequest, closing ExecutionSubContext {}/{}",
+                                request.jobId(), executionNodeId);
+                        subContext.close();
+                    }
+                    statsTables.operationFinished(executionNodeId, null, 0L);
+                    response.onResponse(new NodeCloseContextResponse());
+                } catch (Throwable t) {
+                    statsTables.operationFinished(executionNodeId, Exceptions.messageOf(t), 0L);
+                    response.onFailure(t);
                 }
             }
-            statsTables.operationFinished(request.executionNodeId(), null, 0L);
-            response.onResponse(new NodeCloseContextResponse());
-        } catch (Throwable t) {
-            statsTables.operationFinished(request.executionNodeId(), Exceptions.messageOf(t), 0L);
-            response.onFailure(t);
         }
     }
 }
