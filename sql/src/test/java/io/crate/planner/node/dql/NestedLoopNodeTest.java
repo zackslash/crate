@@ -45,11 +45,13 @@ public class NestedLoopNodeTest extends CrateUnitTest {
     public void testSerialization() throws Exception {
         TopNProjection topNProjection = new TopNProjection(10, 0);
         ImmutableList<Projection> projections = ImmutableList.<Projection>of(topNProjection);
-        NestedLoopNode node = new NestedLoopNode(3, 2, "nestedLoop", projections);
+        NestedLoopNode node = new NestedLoopNode(0, "nestedLoop", projections,
+                new MergeNode(1, "dummy", 1, ImmutableList.<DataType>of(DataTypes.LONG), ImmutableList.<Projection>of()),
+                new MergeNode(2, "dummy", 1, ImmutableList.<DataType>of(DataTypes.LONG), ImmutableList.<Projection>of())
+        );
+
         node.jobId(UUID.randomUUID());
         node.executionNodes(Sets.newHashSet("node1", "node2"));
-        node.leftInputTypes(Arrays.<DataType>asList(DataTypes.UNDEFINED, DataTypes.STRING));
-        node.rightInputTypes(Arrays.<DataType>asList(DataTypes.BOOLEAN, DataTypes.INTEGER, DataTypes.DOUBLE));
         node.downstreamNodes(Sets.newHashSet("node3", "node4"));
         node.downstreamExecutionNodeId(5);
 
@@ -64,10 +66,7 @@ public class NestedLoopNodeTest extends CrateUnitTest {
         assertThat(node.downstreamNodes(), is(node2.downstreamNodes()));
         assertThat(node.executionNodes(), Is.is(node2.executionNodes()));
         assertThat(node.jobId(), Is.is(node2.jobId()));
-        assertThat(node.leftInputTypes(), is(node2.leftInputTypes()));
-        assertThat(node.rightInputTypes(), is(node2.rightInputTypes()));
-        assertThat(node.leftExecutionNodeId(), is(node2.leftExecutionNodeId()));
-        assertThat(node.rightExecutionNodeId(), is(node2.rightExecutionNodeId()));
+        assertThat(node.executionNodeId(), is(node2.executionNodeId()));
         assertThat(node.name(), is(node2.name()));
         assertThat(node.outputTypes(), is(node2.outputTypes()));
     }

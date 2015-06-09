@@ -46,6 +46,7 @@ import io.crate.planner.node.PlanNodeVisitor;
 import io.crate.planner.node.ddl.*;
 import io.crate.planner.node.dml.*;
 import io.crate.planner.node.dql.*;
+import io.crate.planner.node.dql.join.NestedLoop;
 import io.crate.planner.node.management.KillPlan;
 import org.elasticsearch.action.bulk.BulkRetryCoordinatorPool;
 import org.elasticsearch.cluster.ClusterService;
@@ -313,6 +314,7 @@ public class TransportExecutor implements Executor, TaskExecutor {
 
         class Context {
             ExecutionNodesTask executionNodesTask;
+            public boolean isRootPlan = true;
 
             public Context(ExecutionNodesTask executionNodesTask) {
                 this.executionNodesTask = executionNodesTask;
@@ -336,7 +338,7 @@ public class TransportExecutor implements Executor, TaskExecutor {
         }
 
         private void addFinalIfNotNull(@Nullable MergeNode mergeNode, Context context) {
-            if (mergeNode != null) {
+            if (context.isRootPlan && mergeNode != null) {
                 context.executionNodesTask.addFinalMergeNode(mergeNode);
             }
         }
@@ -388,6 +390,27 @@ public class TransportExecutor implements Executor, TaskExecutor {
         public Void visitCountPlan(CountPlan plan, Context context) {
             context.executionNodesTask.addExecutionNode(0, plan.countNode());
             addFinalIfNotNull(plan.mergeNode(), context);
+            return null;
+        }
+
+        @Override
+        public Void visitNestedLoop(NestedLoop plan, Context context) {
+            boolean isRootPlan = context.isRootPlan;
+            if (isRootPlan) {
+                context.isRootPlan = false;
+            }
+            process(plan.left().plan(), context);
+            process(plan.right().plan(), context);
+
+            if (plan.nestedLoopNode().leftMergeNode() != null) {
+                plan.nestedLoopNode().leftMergeNode().jobId(context.executionNodesTask.jobId());
+            }
+            if (plan.nestedLoopNode().rightMergeNode() != null) {
+                plan.nestedLoopNode().rightMergeNode().jobId(context.executionNodesTask.jobId());
+            }
+
+            context.executionNodesTask.addExecutionNode(0, plan.nestedLoopNode());
+            addFinalIfNotNull(plan.localMergeNode(), context);
             return null;
         }
 

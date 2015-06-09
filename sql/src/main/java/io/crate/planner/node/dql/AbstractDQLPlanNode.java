@@ -33,15 +33,22 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public abstract class AbstractDQLPlanNode implements DQLPlanNode, Streamable, ExecutionNode {
 
     private UUID jobId;
     private int executionNodeId;
+
+    @Nullable
+    private List<String> downstreamNodes;
+    private int downstreamExecutionNodeId = NO_EXECUTION_NODE;
+    private byte downstreamInputId = 0;
     private String name;
     protected List<Projection> projections = ImmutableList.of();
     protected List<DataType> outputTypes = ImmutableList.of();
@@ -75,6 +82,38 @@ public abstract class AbstractDQLPlanNode implements DQLPlanNode, Streamable, Ex
     public int executionNodeId() {
         return executionNodeId;
     }
+
+    @Nullable
+    public List<String> downstreamNodes() {
+        return downstreamNodes;
+    }
+
+    public void downstreamNodes(List<String> downStreamNodes) {
+        this.downstreamNodes = downStreamNodes;
+    }
+
+    public void downstreamNodes(Set<String> downStreamNodes) {
+        this.downstreamNodes = ImmutableList.copyOf(downStreamNodes);
+    }
+
+    @Override
+    public int downstreamExecutionNodeId() {
+        return downstreamExecutionNodeId;
+    }
+
+    public void downstreamExecutionNodeId(int downstreamExecutionNodeId) {
+        this.downstreamExecutionNodeId = downstreamExecutionNodeId;
+    }
+
+    @Override
+    public byte downstreamInputId() {
+        return downstreamInputId;
+    }
+
+    public void downstreamInputId(byte downstreamInputId) {
+        this.downstreamInputId = downstreamInputId;
+    }
+
 
     @Override
     public boolean hasProjections() {
@@ -111,13 +150,18 @@ public abstract class AbstractDQLPlanNode implements DQLPlanNode, Streamable, Ex
         name = in.readString();
         jobId = new UUID(in.readLong(), in.readLong());
         executionNodeId = in.readVInt();
+        int numDownStreams = in.readVInt();
+        downstreamNodes = new ArrayList<>(numDownStreams);
+        for (int i = 0; i < numDownStreams; i++) {
+            downstreamNodes.add(in.readString());
+        }
+        downstreamExecutionNodeId = in.readVInt();
+        downstreamInputId = in.readByte();
 
-        int numCols = in.readVInt();
-        if (numCols > 0) {
-            outputTypes = new ArrayList<>(numCols);
-            for (int i = 0; i < numCols; i++) {
-                outputTypes.add(DataTypes.fromStream(in));
-            }
+        int numOutputCols = in.readVInt();
+        outputTypes = new ArrayList<>(numOutputCols);
+        for (int i = 0; i < numOutputCols; i++) {
+            outputTypes.add(DataTypes.fromStream(in));
         }
 
         int numProjections = in.readVInt();
@@ -138,10 +182,21 @@ public abstract class AbstractDQLPlanNode implements DQLPlanNode, Streamable, Ex
         out.writeLong(jobId.getLeastSignificantBits());
         out.writeVInt(executionNodeId);
 
-        int numCols = outputTypes.size();
-        out.writeVInt(numCols);
-        for (int i = 0; i < numCols; i++) {
-            DataTypes.toStream(outputTypes.get(i), out);
+        if (downstreamNodes != null) {
+            out.writeVInt(downstreamNodes.size());
+            for (String downstreamNode : downstreamNodes) {
+                out.writeString(downstreamNode);
+            }
+        } else {
+            out.writeVInt(0);
+        }
+
+        out.writeVInt(downstreamExecutionNodeId);
+        out.writeByte(downstreamInputId);
+
+        out.writeVInt(outputTypes.size());
+        for (DataType outputType : outputTypes) {
+            DataTypes.toStream(outputType, out);
         }
 
         if (hasProjections()) {

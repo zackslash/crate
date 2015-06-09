@@ -24,6 +24,7 @@ package io.crate.planner.node;
 import io.crate.Streamer;
 import io.crate.planner.node.dql.CollectNode;
 import io.crate.planner.node.dql.MergeNode;
+import io.crate.planner.node.dql.join.NestedLoopNode;
 import io.crate.types.DataTypes;
 
 /**
@@ -52,8 +53,14 @@ public class StreamerVisitor {
         }
 
         @Override
+        public Streamer<?>[] visitNestedLoopNode(NestedLoopNode node, Void context) {
+            return DataTypes.getStreamer(node.outputTypes());
+        }
+
+        @Override
         protected Streamer<?>[] visitExecutionNode(ExecutionNode node, Void context) {
             throw new UnsupportedOperationException(String.format("Got unsupported ExecutionNode %s", node.getClass().getName()));
         }
     }
 }
+

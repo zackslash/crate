@@ -32,9 +32,11 @@ import io.crate.metadata.PartitionName;
 import io.crate.metadata.Routing;
 import io.crate.metadata.table.TableInfo;
 import io.crate.planner.consumer.OrderByPositionVisitor;
+import io.crate.planner.node.dql.AbstractDQLPlanNode;
 import io.crate.planner.node.dql.CollectNode;
 import io.crate.planner.node.dql.DQLPlanNode;
 import io.crate.planner.node.dql.MergeNode;
+import io.crate.planner.node.dql.join.NestedLoopNode;
 import io.crate.planner.projection.Projection;
 import io.crate.planner.symbol.InputColumn;
 import io.crate.planner.symbol.Symbol;
@@ -42,6 +44,7 @@ import io.crate.planner.symbol.Symbol;
 import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 public class PlanNodeBuilder {
@@ -129,6 +132,64 @@ public class PlanNodeBuilder {
                 orderBy.reverseFlags(),
                 orderBy.nullsFirst()
         );
+    }
+
+    public static <PN extends AbstractDQLPlanNode> NestedLoopNode localNestedLoopNode(
+            List<Projection> projections,
+            Set<String> executionNodes,
+            PN leftPreviousNode,
+            PN rightPreviousNode,
+            List<Symbol> leftSymbols,
+            List<Symbol> rightSymbols,
+            @Nullable OrderBy leftOrderBy,
+            @Nullable OrderBy rightOrderBy,
+            Planner.Context plannerContext) {
+
+        MergeNode leftMergeNode;
+        MergeNode rightMergeNode;
+        if (leftOrderBy != null) {
+            leftMergeNode = sortedLocalMerge(
+                    ImmutableList.<Projection>of(), leftOrderBy, leftSymbols,
+                    null, leftPreviousNode, plannerContext);
+        } else {
+            leftMergeNode = localMerge(
+                    ImmutableList.<Projection>of(), leftPreviousNode, plannerContext);
+        }
+        if (rightOrderBy != null) {
+            rightMergeNode = sortedLocalMerge(
+                    ImmutableList.<Projection>of(), rightOrderBy, rightSymbols,
+                    null, rightPreviousNode, plannerContext);
+        } else {
+            rightMergeNode = localMerge(
+                    ImmutableList.<Projection>of(), rightPreviousNode, plannerContext);
+        }
+
+        NestedLoopNode node = new NestedLoopNode(
+                plannerContext.nextExecutionNodeId(),
+                "localNestedLoopNode",
+                projections,
+                leftMergeNode,
+                rightMergeNode
+        );
+
+        // connect previous nodes with nested loop node (inputs)
+        leftPreviousNode.downstreamNodes(executionNodes);
+        rightPreviousNode.downstreamNodes(executionNodes);
+        leftPreviousNode.downstreamInputId((byte) 0);
+        rightPreviousNode.downstreamInputId((byte) 1);
+        leftPreviousNode.downstreamExecutionNodeId(node.executionNodeId());
+        rightPreviousNode.downstreamExecutionNodeId(node.executionNodeId());
+        node.executionNodes(executionNodes);
+
+        // merge nodes must always run on same crate instance
+        leftMergeNode.downstreamExecutionNodeId(node.executionNodeId());
+        leftMergeNode.downstreamNodes(node.executionNodes());
+        leftMergeNode.executionNodes(node.executionNodes());
+        rightMergeNode.downstreamExecutionNodeId(node.executionNodeId());
+        rightMergeNode.downstreamNodes(node.executionNodes());
+        rightMergeNode.executionNodes(node.executionNodes());
+
+        return node;
     }
 
     public static CollectNode collect(TableInfo tableInfo,
