@@ -21,8 +21,11 @@
 
 package io.crate.planner.node.dql;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import io.crate.planner.node.dql.join.NestedLoopNode;
+import io.crate.planner.projection.Projection;
+import io.crate.planner.projection.TopNProjection;
 import io.crate.test.integration.CrateUnitTest;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
@@ -41,7 +44,9 @@ public class NestedLoopNodeTest extends CrateUnitTest {
     @Test
     public void testSerialization() throws Exception {
 
-        NestedLoopNode node = new NestedLoopNode(2, "nestedLoop");
+        TopNProjection topNProjection = new TopNProjection(10, 0);
+        ImmutableList<Projection> projections = ImmutableList.<Projection>of(topNProjection);
+        NestedLoopNode node = new NestedLoopNode(2, "nestedLoop", projections);
         node.jobId(UUID.randomUUID());
         node.executionNodes(Sets.newHashSet("node1", "node2"));
         node.leftInputTypes(Arrays.<DataType>asList(DataTypes.UNDEFINED, DataTypes.STRING));
@@ -53,7 +58,7 @@ public class NestedLoopNodeTest extends CrateUnitTest {
         node.writeTo(output);
 
         BytesStreamInput input = new BytesStreamInput(output.bytes());
-        NestedLoopNode node2 = new NestedLoopNode();
+        NestedLoopNode node2 = NestedLoopNode.FACTORY.create();
         node2.readFrom(input);
 
         assertThat(node.downstreamExecutionNodeId(), is(node2.downstreamExecutionNodeId()));

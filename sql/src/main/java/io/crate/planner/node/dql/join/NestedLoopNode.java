@@ -24,19 +24,22 @@ package io.crate.planner.node.dql.join;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import io.crate.planner.node.ExecutionNode;
 import io.crate.planner.node.ExecutionNodeVisitor;
-import io.crate.planner.node.PlanNode;
 import io.crate.planner.node.PlanNodeVisitor;
+import io.crate.planner.node.dql.AbstractDQLPlanNode;
+import io.crate.planner.projection.Projection;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
-public class NestedLoopNode implements PlanNode, ExecutionNode {
+public class NestedLoopNode extends AbstractDQLPlanNode {
 
     public static final ExecutionNodeFactory<NestedLoopNode> FACTORY = new ExecutionNodeFactory<NestedLoopNode>() {
         @Override
@@ -45,10 +48,6 @@ public class NestedLoopNode implements PlanNode, ExecutionNode {
         }
     };
 
-    private UUID jobId;
-    private int executionNodeId;
-    private String name;
-    private List<DataType> outputTypes = ImmutableList.of();
     private int downstreamExecutionNodeId = NO_EXECUTION_NODE;
     private Set<String> executionNodes;
     private List<String> downstreamNodes = ImmutableList.of();
@@ -56,27 +55,15 @@ public class NestedLoopNode implements PlanNode, ExecutionNode {
     private List<DataType> leftInputTypes;
     private List<DataType> rightInputTypes;
 
-    public NestedLoopNode() {}
+    NestedLoopNode() {}
 
-    public NestedLoopNode(int executionNodeId, String name) {
-        this.name = name;
-        this.executionNodeId = executionNodeId;
+    public NestedLoopNode(int executionNodeId, String name, List<Projection> projections) {
+        super(executionNodeId, name, projections);
     }
-
 
     @Override
     public Type type() {
         return Type.NESTED_LOOP;
-    }
-
-    @Override
-    public String name() {
-        return name;
-    }
-
-    @Override
-    public int executionNodeId() {
-        return executionNodeId;
     }
 
     @Override
@@ -127,16 +114,6 @@ public class NestedLoopNode implements PlanNode, ExecutionNode {
     }
 
     @Override
-    public UUID jobId() {
-        return jobId;
-    }
-
-    @Override
-    public void jobId(UUID jobId) {
-        this.jobId = jobId;
-    }
-
-    @Override
     public <C, R> R accept(ExecutionNodeVisitor<C, R> visitor, C context) {
         return visitor.visitNestedLoopNode(this, context);
     }
@@ -154,17 +131,7 @@ public class NestedLoopNode implements PlanNode, ExecutionNode {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        name = in.readString();
-        jobId = new UUID(in.readLong(), in.readLong());
-        executionNodeId = in.readVInt();
-
-        int numCols = in.readVInt();
-        if (numCols > 0) {
-            outputTypes = new ArrayList<>(numCols);
-            for (int i = 0; i < numCols; i++) {
-                outputTypes.add(DataTypes.fromStream(in));
-            }
-        }
+        super.readFrom(in);
         downstreamExecutionNodeId = in.readVInt();
 
         int numDownstreamNodes = in.readVInt();
@@ -199,17 +166,7 @@ public class NestedLoopNode implements PlanNode, ExecutionNode {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeString(name);
-        assert jobId != null : "jobId must not be null";
-        out.writeLong(jobId.getMostSignificantBits());
-        out.writeLong(jobId.getLeastSignificantBits());
-        out.writeVInt(executionNodeId);
-
-        int numCols = outputTypes.size();
-        out.writeVInt(numCols);
-        for (int i = 0; i < numCols; i++) {
-            DataTypes.toStream(outputTypes.get(i), out);
-        }
+        super.writeTo(out);
         out.writeVInt(downstreamExecutionNodeId);
         out.writeVInt(downstreamNodes.size());
         for (String downstreamNode : downstreamNodes) {
