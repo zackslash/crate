@@ -52,13 +52,18 @@ public class NestedLoopNode extends AbstractDQLPlanNode {
     private Set<String> executionNodes;
     private List<String> downstreamNodes = ImmutableList.of();
 
+    private int leftExecutionNodeId;
+    private int rightExecutionNodeId;
+
     private List<DataType> leftInputTypes;
     private List<DataType> rightInputTypes;
 
     NestedLoopNode() {}
 
-    public NestedLoopNode(int executionNodeId, String name, List<Projection> projections) {
-        super(executionNodeId, name, projections);
+    public NestedLoopNode(int leftExecutionNodeId, int rightExecutionNodeId, String name, List<Projection> projections) {
+        super(0, name, projections); // TODO: remove passing default execution Node id
+        this.leftExecutionNodeId = leftExecutionNodeId;
+        this.rightExecutionNodeId = rightExecutionNodeId;
     }
 
     @Override
@@ -113,11 +118,24 @@ public class NestedLoopNode extends AbstractDQLPlanNode {
         this.rightInputTypes = rightInputTypes;
     }
 
+    public int leftExecutionNodeId() {
+        return leftExecutionNodeId;
+    }
+
+    public int rightExecutionNodeId() {
+        return rightExecutionNodeId;
+    }
+
+    @Override
+    public int executionNodeId() {
+        throw  new UnsupportedOperationException("executionNodeId() not supported. " +
+                "Use leftExecutionNOdeId() or rightExecutionNodeId()");
+    }
+
     @Override
     public <C, R> R accept(ExecutionNodeVisitor<C, R> visitor, C context) {
         return visitor.visitNestedLoopNode(this, context);
     }
-
 
     @Override
     public <C, R> R accept(PlanNodeVisitor<C, R> visitor, C context) {
@@ -132,6 +150,8 @@ public class NestedLoopNode extends AbstractDQLPlanNode {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
+        leftExecutionNodeId = in.readVInt();
+        rightExecutionNodeId = in.readVInt();
         downstreamExecutionNodeId = in.readVInt();
 
         int numDownstreamNodes = in.readVInt();
@@ -167,6 +187,8 @@ public class NestedLoopNode extends AbstractDQLPlanNode {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
+        out.writeVInt(leftExecutionNodeId);
+        out.writeVInt(rightExecutionNodeId);
         out.writeVInt(downstreamExecutionNodeId);
         out.writeVInt(downstreamNodes.size());
         for (String downstreamNode : downstreamNodes) {

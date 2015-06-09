@@ -43,10 +43,9 @@ public class NestedLoopNodeTest extends CrateUnitTest {
 
     @Test
     public void testSerialization() throws Exception {
-
         TopNProjection topNProjection = new TopNProjection(10, 0);
         ImmutableList<Projection> projections = ImmutableList.<Projection>of(topNProjection);
-        NestedLoopNode node = new NestedLoopNode(2, "nestedLoop", projections);
+        NestedLoopNode node = new NestedLoopNode(3, 2, "nestedLoop", projections);
         node.jobId(UUID.randomUUID());
         node.executionNodes(Sets.newHashSet("node1", "node2"));
         node.leftInputTypes(Arrays.<DataType>asList(DataTypes.UNDEFINED, DataTypes.STRING));
@@ -67,7 +66,8 @@ public class NestedLoopNodeTest extends CrateUnitTest {
         assertThat(node.jobId(), Is.is(node2.jobId()));
         assertThat(node.leftInputTypes(), is(node2.leftInputTypes()));
         assertThat(node.rightInputTypes(), is(node2.rightInputTypes()));
-        assertThat(node.executionNodeId(), is(node2.executionNodeId()));
+        assertThat(node.leftExecutionNodeId(), is(node2.leftExecutionNodeId()));
+        assertThat(node.rightExecutionNodeId(), is(node2.rightExecutionNodeId()));
         assertThat(node.name(), is(node2.name()));
         assertThat(node.outputTypes(), is(node2.outputTypes()));
     }
