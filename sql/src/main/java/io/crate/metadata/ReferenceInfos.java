@@ -112,7 +112,8 @@ public class ReferenceInfos implements Iterable<SchemaInfo>, ClusterStateListene
 
     private SchemaInfo getSchemaInfo(TableIdent ident) {
         String schemaName = firstNonNull(ident.schema(), DEFAULT_SCHEMA_NAME);
-        SchemaInfo schemaInfo = schemas.get(schemaName);
+        SchemaInfo schemaInfo = builtInSchemas.get(schemaName);
+        if (schemaInfo == null) schemaInfo = getCustomSchemaInfo(schemaName);
         if (schemaInfo == null) {
             throw new SchemaUnknownException(schemaName);
         }
@@ -129,8 +130,11 @@ public class ReferenceInfos implements Iterable<SchemaInfo>, ClusterStateListene
         if (!event.metaDataChanged()) {
             return;
         }
+        setNewCurrentSchemas(event.state().metaData());
+    }
 
-        Set<String> newCurrentSchemas = getNewCurrentSchemas(event.state().metaData());
+    private void setNewCurrentSchemas(MetaData indexMetaData) {
+        Set<String> newCurrentSchemas = getNewCurrentSchemas(indexMetaData);
         synchronized (schemas) {
             Sets.SetView<String> nonBuiltInSchemas = Sets.difference(schemas.keySet(), builtInSchemas.keySet());
             Set<String> deleted = Sets.difference(nonBuiltInSchemas, newCurrentSchemas).immutableCopy();
