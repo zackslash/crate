@@ -125,6 +125,10 @@ public class MergePhase extends AbstractDQLPlanPhase {
         return numUpstreams;
     }
 
+    public void numUpstreams(int numUpstreams) {
+        this.numUpstreams = numUpstreams;
+    }
+
     public Collection<? extends DataType> inputTypes() {
         return inputTypes;
     }

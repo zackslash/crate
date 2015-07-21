@@ -24,6 +24,7 @@ package io.crate.planner.node.dql.join;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 import io.crate.planner.node.ExecutionPhaseVisitor;
+import io.crate.planner.node.PlanNode;
 import io.crate.planner.node.PlanNodeVisitor;
 import io.crate.planner.node.dql.AbstractDQLPlanPhase;
 import io.crate.planner.node.dql.MergePhase;
@@ -53,16 +54,21 @@ public class NestedLoopPhase extends AbstractDQLPlanPhase {
                            int executionNodeId,
                            String name,
                            List<Projection> projections,
-                           MergePhase leftMergePhase,
-                           MergePhase rightMergePhase,
+                           PlanNode leftNode,
+                           PlanNode rightNode,
                            Set<String> executionNodes) {
         super(jobId, executionNodeId, name, projections);
-        this.leftMergePhase = leftMergePhase;
-        this.rightMergePhase = rightMergePhase;
+
+        if (leftNode instanceof MergePhase) {
+            leftMergePhase = (MergePhase)leftNode;
+        }
+        if (rightNode instanceof MergePhase) {
+            rightMergePhase = (MergePhase)rightNode;
+        }
         this.executionNodes = executionNodes;
-        outputTypes = new ArrayList<>(leftMergePhase.outputTypes().size() + rightMergePhase.outputTypes().size());
-        outputTypes.addAll(leftMergePhase.outputTypes());
-        outputTypes.addAll(rightMergePhase.outputTypes());
+        outputTypes = new ArrayList<>(leftNode.outputTypes().size() + rightNode.outputTypes().size());
+        outputTypes.addAll(leftNode.outputTypes());
+        outputTypes.addAll(rightNode.outputTypes());
     }
 
     @Override

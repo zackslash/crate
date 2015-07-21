@@ -45,6 +45,7 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
     private String name;
     protected List<Projection> projections = ImmutableList.of();
     protected List<DataType> outputTypes = ImmutableList.of();
+    protected DistributionType distributionType = DistributionType.BROADCAST;
 
     public AbstractDQLPlanPhase() {
 
@@ -100,11 +101,20 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
         return outputTypes;
     }
 
+    public void distributionType(DistributionType distributionType) {
+        this.distributionType = distributionType;
+    }
+
+    public DistributionType distributionType() {
+        return distributionType;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         name = in.readString();
         jobId = new UUID(in.readLong(), in.readLong());
         executionPhaseId = in.readVInt();
+        distributionType = DistributionType.values()[in.readVInt()];
 
         int numCols = in.readVInt();
         if (numCols > 0) {
@@ -131,6 +141,7 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
         out.writeLong(jobId.getMostSignificantBits());
         out.writeLong(jobId.getLeastSignificantBits());
         out.writeVInt(executionPhaseId);
+        out.writeVInt(distributionType.ordinal());
 
         int numCols = outputTypes.size();
         out.writeVInt(numCols);

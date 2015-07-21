@@ -23,10 +23,8 @@ package io.crate.operation.projectors;
 
 import com.google.common.collect.Lists;
 import io.crate.Streamer;
-import io.crate.executor.transport.distributed.BroadcastDistributingDownstream;
-import io.crate.executor.transport.distributed.ModuloDistributingDownstream;
-import io.crate.executor.transport.distributed.SingleBucketBuilder;
-import io.crate.executor.transport.distributed.TransportDistributedResultAction;
+import io.crate.executor.transport.distributed.*;
+import io.crate.jobs.JobContextService;
 import io.crate.operation.NodeOperation;
 import io.crate.planner.node.ExecutionPhase;
 import io.crate.planner.node.ExecutionPhases;
@@ -38,6 +36,7 @@ import org.elasticsearch.common.settings.Settings;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.UUID;
 
 @Singleton
@@ -45,14 +44,17 @@ public class InternalResultProviderFactory implements ResultProviderFactory {
 
     private final ClusterService clusterService;
     private final TransportDistributedResultAction transportDistributedResultAction;
+    private final JobContextService jobContextService;
     private final Settings settings;
 
     @Inject
     public InternalResultProviderFactory(ClusterService clusterService,
                                          TransportDistributedResultAction transportDistributedResultAction,
+                                         JobContextService jobContextService,
                                          Settings settings) {
         this.clusterService = clusterService;
         this.transportDistributedResultAction = transportDistributedResultAction;
+        this.jobContextService = jobContextService;
         this.settings = settings;
     }
 
@@ -63,38 +65,55 @@ public class InternalResultProviderFactory implements ResultProviderFactory {
                 ExecutionPhases.hasDirectResponseDownstream(nodeOperation.downstreamNodes())) {
             return new SingleBucketBuilder(streamers);
         } else {
-            assert nodeOperation.downstreamNodes().size() > 0 : "must have at least one downstream";
-
             // TODO: set bucketIdx properly
             ArrayList<String> server = Lists.newArrayList(nodeOperation.executionPhase().executionNodes());
             Collections.sort(server);
             int bucketIdx = Math.max(server.indexOf(clusterService.localNode().id()), 0);
 
-            if (nodeOperation.downstreamNodes().size() == 1) {
-                // using modulo based distribution does not make sense if distributing to 1 node only
-                // lets use the broadcast distribution which simply passes every bucket to every node
-                return new BroadcastDistributingDownstream(
-                        jobId,
-                        nodeOperation.downstreamExecutionPhaseId(),
-                        nodeOperation.downstreamExecutionPhaseInputId(),
-                        bucketIdx,
-                        nodeOperation.downstreamNodes(),
-                        transportDistributedResultAction,
-                        streamers,
-                        settings
-                );
-            }
+            switch (nodeOperation.executionPhase().distributionType()) {
+                case MODULO:
+                    assertOneDownstream(nodeOperation);
+                    return new ModuloDistributingDownstream(
+                            jobId,
+                            nodeOperation.downstreamExecutionPhaseId(),
+                            nodeOperation.downstreamExecutionPhaseInputId(),
+                            bucketIdx,
+                            nodeOperation.downstreamNodes(),
+                            transportDistributedResultAction,
+                            streamers,
+                            settings
+                    );
 
-            return new ModuloDistributingDownstream(
-                    jobId,
-                    nodeOperation.downstreamExecutionPhaseId(),
-                    nodeOperation.downstreamExecutionPhaseInputId(),
-                    bucketIdx,
-                    nodeOperation.downstreamNodes(),
-                    transportDistributedResultAction,
-                    streamers,
-                    settings
-            );
+                case BROADCAST:
+                    assertOneDownstream(nodeOperation);
+                    return new BroadcastDistributingDownstream(
+                            jobId,
+                            nodeOperation.downstreamExecutionPhaseId(),
+                            nodeOperation.downstreamExecutionPhaseInputId(),
+                            bucketIdx,
+                            nodeOperation.downstreamNodes(),
+                            transportDistributedResultAction,
+                            streamers,
+                            settings
+                    );
+
+                case SAME_NODE:
+                    return new SameNodeDistributingDownstream(
+                            jobId,
+                            nodeOperation.downstreamExecutionPhaseId(),
+                            nodeOperation.downstreamExecutionPhaseInputId(),
+                            jobContextService
+                    );
+
+                default:
+                    throw new UnsupportedOperationException(String.format(Locale.ENGLISH,
+                            "Unsupported distribution type '%s'",
+                            nodeOperation.executionPhase().distributionType()));
+            }
         }
+    }
+
+    private void assertOneDownstream(NodeOperation nodeOperation) {
+        assert nodeOperation.downstreamNodes().size() > 0 : "must have at least one downstream";
     }
 }

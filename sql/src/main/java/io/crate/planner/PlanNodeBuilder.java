@@ -33,6 +33,7 @@ import io.crate.metadata.Routing;
 import io.crate.metadata.doc.DocTableInfo;
 import io.crate.metadata.table.TableInfo;
 import io.crate.planner.consumer.OrderByPositionVisitor;
+import io.crate.planner.node.ExecutionPhase;
 import io.crate.planner.node.dql.CollectPhase;
 import io.crate.planner.node.dql.DQLPlanNode;
 import io.crate.planner.node.dql.MergePhase;
@@ -82,6 +83,7 @@ public class PlanNodeBuilder {
                 collectNode.outputTypes(),
                 projections
         );
+        collectNode.distributionType(ExecutionPhase.DistributionType.MODULO);
 
         node.executionNodes(ImmutableSet.copyOf(collectNode.executionNodes()));
         return node;

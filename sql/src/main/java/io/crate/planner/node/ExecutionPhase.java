@@ -59,6 +59,12 @@ public interface ExecutionPhase extends Streamable {
         }
     }
 
+    enum DistributionType {
+        MODULO,
+        BROADCAST,
+        SAME_NODE
+    }
+
     Type type();
 
     String name();
@@ -68,6 +74,9 @@ public interface ExecutionPhase extends Streamable {
     Set<String> executionNodes();
 
     UUID jobId();
+
+    void distributionType(DistributionType distributionType);
+    DistributionType distributionType();
 
     <C, R> R accept(ExecutionPhaseVisitor<C, R> visitor, C context);
 }

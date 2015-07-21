@@ -69,6 +69,7 @@ public class NestedLoopOperation implements RowUpstream, RowDownstream {
     public NestedLoopOperation() {
         leftDownstreamHandle = new LeftDownstreamHandle();
         rightDownstreamHandle = new RightDownstreamHandle();
+        LOGGER.setLevel("trace");
     }
 
 

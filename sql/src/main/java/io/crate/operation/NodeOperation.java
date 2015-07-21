@@ -22,6 +22,7 @@
 package io.crate.operation;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import io.crate.planner.node.ExecutionPhase;
 import io.crate.planner.node.ExecutionPhases;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -61,7 +62,18 @@ public class NodeOperation implements Streamable {
                     ImmutableList.of("_response"),
                     downstreamExecutionPhase.executionPhaseId(),
                     inputId);
+        } else if (executionPhase.distributionType() == ExecutionPhase.DistributionType.SAME_NODE) {
+            return new NodeOperation(executionPhase,
+                    ImmutableSet.<String>of(),
+                    downstreamExecutionPhase.executionPhaseId(),
+                    inputId);
         } else {
+            if (downstreamExecutionPhase.executionNodes().size() == 1) {
+                // currently the broadcast distribution is the less expensive one related to
+                // downstream calculation, so FORCE this one if we only have 1 downstream
+                executionPhase.distributionType(ExecutionPhase.DistributionType.BROADCAST);
+            }
+
             return new NodeOperation(executionPhase,
                     downstreamExecutionPhase.executionNodes(),
                     downstreamExecutionPhase.executionPhaseId(),

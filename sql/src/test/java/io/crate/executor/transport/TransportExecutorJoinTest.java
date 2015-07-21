@@ -35,6 +35,7 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.doc.DocTableInfo;
 import io.crate.planner.PlanNodeBuilder;
 import io.crate.planner.Planner;
+import io.crate.planner.node.ExecutionPhase;
 import io.crate.planner.node.dql.CollectPhase;
 import io.crate.planner.node.dql.MergePhase;
 import io.crate.planner.node.dql.QueryAndFetch;
@@ -57,8 +58,29 @@ import static org.hamcrest.core.Is.is;
 
 public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
 
+    UUID jobId;
+    Planner.Context plannerContext;
+    Set<String> localExecutionNode;
+
+    List<Symbol> outerLeftCollectSymbols;
+    OrderBy outerLeftOrderBy;
+    CollectPhase outerLeftCollectPhase;
+
+    List<Symbol> outerRightCollectSymbols;
+    OrderBy outerRightOrderBy;
+
+    List<Symbol> innerLeftCollectSymbols;
+    OrderBy innerLeftOrderBy;
+    CollectPhase innerLeftCollectPhase;
+
+    List<Symbol> innerRightCollectSymbols;
+    OrderBy innerRightOrderBy;
+    CollectPhase innerRightCollectPhase;
+
+    List<Symbol> outputSymbols;
+
     @Before
-    public void setUpTestTables() throws Exception {
+    public void prepare() throws Exception {
         execute("create table colors (id int, name string)");
         execute("create table sizes (id int, name string)");
         execute("create table gender (id int, name string)");
@@ -78,15 +100,6 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
                 new Object[]{2, "male"},
         });
         execute("refresh table colors, sizes, gender");
-    }
-
-    @Test
-    public void testNestedLoopWithOrderedQAF() throws Exception {
-        // select colors.id, colors.name,
-        //        sizes.id, sizes.name,
-        //        gender.id, gender.name
-        //   from colors, sizes, gender
-        //   order by colors.id, sizes.id, gender.name;
 
         DocTableInfo colors = docSchemaInfo.getTableInfo("colors");
         DocTableInfo sizes = docSchemaInfo.getTableInfo("sizes");
@@ -101,26 +114,26 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
         Reference innerRightIdRef = new Reference(gender.getReferenceInfo(new ColumnIdent("id")));
         Reference innerRightNameRef = new Reference(gender.getReferenceInfo(new ColumnIdent("name")));
 
-        List<Symbol> outerLeftCollectSymbols = Lists.<Symbol>newArrayList(outerLeftIdRef, outerLeftNameRef);
-        List<Symbol> innerLeftCollectSymbols = Lists.<Symbol>newArrayList(innerLeftIdRef, innerLeftNameRef);
-        List<Symbol> innerRightCollectSymbols = Lists.<Symbol>newArrayList(innerRightIdRef, innerRightNameRef);
-        List<Symbol> outputSymbols = Lists.newArrayList(outerLeftCollectSymbols);
+        outerLeftCollectSymbols = Lists.<Symbol>newArrayList(outerLeftIdRef, outerLeftNameRef);
+        innerLeftCollectSymbols = Lists.<Symbol>newArrayList(innerLeftIdRef, innerLeftNameRef);
+        innerRightCollectSymbols = Lists.<Symbol>newArrayList(innerRightIdRef, innerRightNameRef);
+        outputSymbols = Lists.newArrayList(outerLeftCollectSymbols);
         outputSymbols.addAll(innerLeftCollectSymbols);
         outputSymbols.addAll(innerRightCollectSymbols);
 
-        UUID jobId = UUID.randomUUID();
+        jobId = UUID.randomUUID();
         ProjectionBuilder projectionBuilder = new ProjectionBuilder(null, null);
-        Planner.Context plannerContext = new Planner.Context(clusterService(), jobId);
+        plannerContext = new Planner.Context(clusterService(), jobId);
         String localNodeId = clusterService.localNode().id();
-        Set<String> localExecutionNode = Sets.newHashSet(localNodeId);
+        localExecutionNode = Sets.newHashSet(localNodeId);
 
         // outer left relation
-        OrderBy outerLeftOrderBy = new OrderBy(ImmutableList.<Symbol>of(outerLeftIdRef),
+        outerLeftOrderBy = new OrderBy(ImmutableList.<Symbol>of(outerLeftIdRef),
                 new boolean[]{false}, new Boolean[]{false});
         MergeProjection outerLeftMergeProjection = projectionBuilder.mergeProjection(
                 outerLeftCollectSymbols,
                 outerLeftOrderBy);
-        CollectPhase outerLeftCollectPhase = PlanNodeBuilder.distributingCollect(
+        outerLeftCollectPhase = PlanNodeBuilder.distributingCollect(
                 jobId,
                 colors,
                 plannerContext,
@@ -129,13 +142,19 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
                 ImmutableList.<Projection>of(outerLeftMergeProjection));
         outerLeftCollectPhase.orderBy(outerLeftOrderBy);
 
+        // outer right symbols
+        outerRightCollectSymbols = Lists.newArrayList(innerLeftCollectSymbols);
+        outerRightCollectSymbols.addAll(innerRightCollectSymbols);
+        outerRightOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerLeftIdRef, innerRightNameRef),
+                new boolean[]{false, false}, new Boolean[]{false, false});
+
         // inner left relation
-        OrderBy innerLeftOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerLeftIdRef),
+        innerLeftOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerLeftIdRef),
                 new boolean[]{false}, new Boolean[]{false});
         MergeProjection innerLeftMergeProjection = projectionBuilder.mergeProjection(
                 innerLeftCollectSymbols,
                 innerLeftOrderBy);
-        CollectPhase innerLeftCollectPhase = PlanNodeBuilder.distributingCollect(
+        innerLeftCollectPhase = PlanNodeBuilder.distributingCollect(
                 jobId,
                 sizes,
                 plannerContext,
@@ -145,12 +164,12 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
         innerLeftCollectPhase.orderBy(innerLeftOrderBy);
 
         // inner right relation
-        OrderBy innerRightOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerRightNameRef),
+        innerRightOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerRightNameRef),
                 new boolean[]{false}, new Boolean[]{false});
         MergeProjection innerRightMergeProjection = projectionBuilder.mergeProjection(
                 innerRightCollectSymbols,
                 innerRightOrderBy);
-        CollectPhase innerRightCollectPhase = PlanNodeBuilder.distributingCollect(
+        innerRightCollectPhase = PlanNodeBuilder.distributingCollect(
                 jobId,
                 gender,
                 plannerContext,
@@ -158,6 +177,17 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
                 innerRightCollectSymbols,
                 ImmutableList.<Projection>of(innerRightMergeProjection));
         innerRightCollectPhase.orderBy(innerRightOrderBy);
+
+    }
+
+    @Test
+    public void testNestedLoopWithOrderedQAF() throws Exception {
+        // select colors.id, colors.name,
+        //        sizes.id, sizes.name,
+        //        gender.id, gender.name
+        //   from colors, sizes, gender
+        //   order by colors.id, sizes.id, gender.name;
+
 
         // inner nested loop node
         MergePhase innerLeftMergePhase = PlanNodeBuilder.sortedLocalMerge(
@@ -195,11 +225,122 @@ public class TransportExecutorJoinTest extends BaseTransportExecutorTest {
                 false, null);
 
         // outer nested loop node
-        List<Symbol> outerRightCollectSymbols = Lists.newArrayList(innerLeftCollectSymbols);
-        outerRightCollectSymbols.addAll(innerRightCollectSymbols);
-        OrderBy outerRightOrderBy = new OrderBy(ImmutableList.<Symbol>of(innerLeftIdRef, innerRightNameRef),
-                new boolean[]{false, false}, new Boolean[]{false, false});
+        MergePhase outerLeftMergePhase = PlanNodeBuilder.sortedLocalMerge(
+                jobId,
+                ImmutableList.<Projection>of(),
+                outerLeftOrderBy,
+                outerLeftCollectSymbols,
+                outerLeftOrderBy.orderBySymbols(),
+                outerLeftCollectPhase,
+                plannerContext
+        );
+        MergePhase outerRightMergePhase = PlanNodeBuilder.sortedLocalMerge(
+                jobId,
+                ImmutableList.<Projection>of(),
+                outerRightOrderBy,
+                outerRightCollectSymbols,
+                outerRightOrderBy.orderBySymbols(),
+                innerNestedLoopPhase,
+                plannerContext
+        );
 
+        NestedLoopPhase outerNestedLoopPhase = new NestedLoopPhase(
+                jobId,
+                plannerContext.nextExecutionPhaseId(),
+                "nested-loop",
+                ImmutableList.<Projection>of(),
+                outerLeftMergePhase,
+                outerRightMergePhase,
+                localExecutionNode
+        );
+
+        // final local merge
+        MergePhase localMergePhase = PlanNodeBuilder.sortedLocalMerge(
+                jobId,
+                ImmutableList.<Projection>of(),
+                innerLeftOrderBy,
+                outputSymbols,
+                null,
+                outerNestedLoopPhase,
+                plannerContext);
+        localMergePhase.executionNodes(localExecutionNode);
+
+        // nested loop plan
+        NestedLoop nestedLoopPlan = new NestedLoop(
+                jobId,
+                new QueryAndFetch(outerLeftCollectPhase, null, jobId),
+                innerPlan,
+                outerNestedLoopPhase,
+                false,
+                localMergePhase);
+
+        Job job = executor.newJob(nestedLoopPlan);
+        assertThat(job.tasks().size(), is(1));
+        List<? extends ListenableFuture<TaskResult>> result = executor.execute(job);
+        Bucket rows = result.get(0).get().rows();
+        assertThat(rows.size(), is(12));
+
+        assertThat(TestingHelpers.printedTable(rows), is("" +
+                "1| red| 1| small| 1| female\n" +
+                "1| red| 1| small| 2| male\n" +
+                "1| red| 2| large| 1| female\n" +
+                "1| red| 2| large| 2| male\n" +
+                "2| blue| 1| small| 1| female\n" +
+                "2| blue| 1| small| 2| male\n" +
+                "2| blue| 2| large| 1| female\n" +
+                "2| blue| 2| large| 2| male\n" +
+                "3| green| 1| small| 1| female\n" +
+                "3| green| 1| small| 2| male\n" +
+                "3| green| 2| large| 1| female\n" +
+                "3| green| 2| large| 2| male\n"));
+    }
+
+    @Test
+    public void testDistributedNestedLoopWithOrderedQAF() throws Exception {
+        // select colors.id, colors.name,
+        //        sizes.id, sizes.name,
+        //        gender.id, gender.name
+        //   from colors, sizes, gender
+        //   order by colors.id, sizes.id, gender.name;
+
+        // inner nested loop node
+        MergePhase innerLeftMergePhase = PlanNodeBuilder.sortedLocalMerge(
+                jobId,
+                ImmutableList.<Projection>of(),
+                innerLeftOrderBy,
+                innerLeftCollectSymbols,
+                innerLeftOrderBy.orderBySymbols(),
+                innerLeftCollectPhase,
+                plannerContext
+        );
+
+
+        innerRightCollectPhase.distributionType(ExecutionPhase.DistributionType.SAME_NODE);
+        MergePhase innerRightMergePhase = PlanNodeBuilder.localMerge(
+                jobId,
+                ImmutableList.<Projection>of(),
+                innerRightCollectPhase,
+                plannerContext
+        );
+        innerRightMergePhase.numUpstreams(1);
+
+        NestedLoopPhase innerNestedLoopPhase = new NestedLoopPhase(
+                jobId,
+                plannerContext.nextExecutionPhaseId(),
+                "nested-loop",
+                ImmutableList.<Projection>of(),
+                innerLeftMergePhase,
+                innerRightMergePhase,
+                innerRightCollectPhase.executionNodes()
+        );
+        PlannedAnalyzedRelation innerPlan = new NestedLoop(
+                jobId,
+                new QueryAndFetch(innerLeftCollectPhase, null, jobId),
+                new QueryAndFetch(innerRightCollectPhase, null, jobId),
+                innerNestedLoopPhase,
+                false, null);
+
+        // outer nested loop node
         MergePhase outerLeftMergePhase = PlanNodeBuilder.sortedLocalMerge(
                 jobId,
                 ImmutableList.<Projection>of(),

@@ -46,6 +46,7 @@ public class CountPhase implements ExecutionPhase {
     private int executionPhaseId;
     private Routing routing;
     private WhereClause whereClause;
+    private DistributionType distributionType = DistributionType.BROADCAST;
 
     CountPhase() {}
 
@@ -82,6 +83,16 @@ public class CountPhase implements ExecutionPhase {
     @Override
     public int executionPhaseId() {
         return executionPhaseId;
+    }
+
+    @Override
+    public void distributionType(DistributionType distributionType) {
+        throw new UnsupportedOperationException("CountPhase does not support to change the distributing type");
+    }
+
+    @Override
+    public DistributionType distributionType() {
+        return distributionType;
     }
 
     @Override
