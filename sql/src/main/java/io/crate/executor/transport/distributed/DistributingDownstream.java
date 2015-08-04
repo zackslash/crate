@@ -86,25 +86,40 @@ public abstract class DistributingDownstream extends ResultProviderBase {
         if (allDownstreamsFinished()) {
             return false;
         }
+        //noinspection ThrowableResultOfMethodCallIgnored
+        if (multiUpstreamRowDownstream.failure() != null) {
+            return false;
+        }
 
         try {
-            rowQueue.put(new RowN(row.materialize()));
+            Row materializedRow = new RowN(row.materialize());
+            if (!rowQueue.offer(materializedRow)) {
+                // should not happen, we must pause instead of block
+                logger().warn("row queue is full, will block until a slot is available!");
+                rowQueue.put(materializedRow);
+            }
             if (allDownstreamsFinished()) {
                 // in case the Q just got unblocked from a response with needMore=false
                 return false;
             }
             sendRequestsIfNeeded();
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
+            if (rowQueue.remainingCapacity() == 0) {
+                logger().trace("row queue is full, will pause");
+                pause();
+                return false;
             }
-            fail(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return false;
         }
         return true;
     }
 
     private void sendRequestsIfNeeded() {
+        //noinspection ThrowableResultOfMethodCallIgnored
+        if (multiUpstreamRowDownstream.failure() != null) {
+            return;
+        }
         synchronized (rowQueue) {
             if (!requestsPending.get() && (fullPageInQueue() || multiUpstreamRowDownstream.pendingUpstreams() == 0)) {
                 if (!requestsPending.compareAndSet(false, true)) {
@@ -170,6 +185,11 @@ public abstract class DistributingDownstream extends ResultProviderBase {
                 drainPageFromQueue();
             }
         }
+        //noinspection ThrowableResultOfMethodCallIgnored
+        if (multiUpstreamRowDownstream.failure() != null) {
+            return;
+        }
+
         synchronized (requestsPending) {
             if (currentPageProcessed.incrementAndGet() == downstreams.length) {
                 currentPageProcessed.set(0);
@@ -179,6 +199,14 @@ public abstract class DistributingDownstream extends ResultProviderBase {
 
         if (needMore && !lastPageSent.get() && !killed) {
             sendRequestsIfNeeded();
+            if (isPaused && rowQueue.remainingCapacity() > 0) {
+                logger().trace("row queue is drained, will resume");
+                try {
+                    resume(multiUpstreamRowDownstream.upstreams().size() > 1);
+                } catch (Exception e) {
+                    fail(e);
+                }
+            }
         }
     }
 
@@ -225,9 +253,15 @@ public abstract class DistributingDownstream extends ResultProviderBase {
 
         private void sendRequest(final DistributedResultRequest request) {
             if (logger().isTraceEnabled()) {
-                logger().trace("[{}] sending distributing result request to {} {} input {}, isLast? {}, size {} ...",
-                        jobId.toString(),
-                        node, inputId, request.isLast(), request.rows().size());
+                //noinspection ThrowableResultOfMethodCallIgnored
+                if (request.throwable() == null) {
+                    logger().trace("[{}] sending distributing result request to {} input {}, isLast? {}, size {} ...",
+                            jobId.toString(),
+                            node, inputId, request.isLast(), request.rows().size());
+                } else {
+                    logger().trace("[{}] forwarding failure to {} input {}",
+                            jobId.toString(), node, inputId);
+                }
             }
             try {
                 transportDistributedResultAction.pushResult(

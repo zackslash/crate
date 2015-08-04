@@ -21,7 +21,12 @@
 
 package io.crate.operation;
 
+import org.elasticsearch.common.logging.ESLogger;
+import org.elasticsearch.common.logging.Loggers;
+
 public class MultiUpstreamRowUpstream implements RowUpstream {
+
+    private static final ESLogger LOGGER = Loggers.getLogger(MultiUpstreamRowUpstream.class);
 
     private final MultiUpstreamRowDownstream multiUpstreamRowDownstream;
 
@@ -40,6 +45,10 @@ public class MultiUpstreamRowUpstream implements RowUpstream {
 
     @Override
     public void resume(boolean async) {
+        if (multiUpstreamRowDownstream.failure() != null) {
+            LOGGER.trace("A failure occurred, will not resume.");
+            return;
+        }
         if (multiUpstreamRowDownstream.upstreamsRunning()) {
             int i = 1;
             for (RowUpstream upstream : multiUpstreamRowDownstream.upstreams()) {

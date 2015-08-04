@@ -33,6 +33,7 @@ public abstract class ResultProviderBase implements ResultProvider {
     private final SettableFuture<Bucket> result = SettableFuture.create();
     protected final MultiUpstreamRowDownstream multiUpstreamRowDownstream = new MultiUpstreamRowDownstream();
     private final MultiUpstreamRowUpstream multiUpstreamRowUpstream = new MultiUpstreamRowUpstream(multiUpstreamRowDownstream);
+    protected volatile boolean isPaused = false;
 
     protected ExecutionState executionState;
 
@@ -89,11 +90,13 @@ public abstract class ResultProviderBase implements ResultProvider {
 
     @Override
     public void pause() {
+        isPaused = true;
         multiUpstreamRowUpstream.pause();
     }
 
     @Override
     public void resume(boolean async) {
         multiUpstreamRowUpstream.resume(async);
+        isPaused = false;
     }
 }
