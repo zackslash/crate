@@ -35,6 +35,7 @@ import io.crate.metadata.doc.DocSysColumns;
 import io.crate.metadata.doc.DocTableInfo;
 import io.crate.operation.Paging;
 import io.crate.planner.PlanNodeBuilder;
+import io.crate.planner.fetch.FetchPushDown;
 import io.crate.planner.node.NoopPlannedAnalyzedRelation;
 import io.crate.planner.node.dql.CollectPhase;
 import io.crate.planner.node.dql.MergePhase;
@@ -98,6 +99,17 @@ public class QueryThenFetchConsumer implements Consumer {
             if (querySpec.where().noMatch()) {
                 return new NoopPlannedAnalyzedRelation(table, context.plannerContext().jobId());
             }
+
+            QuerySpec pushedDownSpec = FetchPushDown.pushDown(querySpec, table.tableRelation().tableInfo().ident());
+            if (pushedDownSpec == null){
+                return null;
+            }
+
+            PlannedAnalyzedRelation plannedSubQuery = consumingPlanner.plan(statement.subQueryRelation(), context);
+            if (plannedSubQuery == null) {
+                return null;
+            }
+
 
             boolean outputsAreAllOrdered = false;
             boolean needFetchProjection = REFERENCES_COLLECTOR.collect(querySpec.outputs()).containsAnyReference();
