@@ -21,34 +21,38 @@
 
 package io.crate.planner.node;
 
-import io.crate.planner.node.dql.CollectPhase;
-import io.crate.planner.node.dql.CountPhase;
-import io.crate.planner.node.dql.MergePhase;
-import io.crate.planner.node.fetch.FetchPhase;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.io.stream.StreamOutput;
 
-public class ExecutionPhaseVisitor<C, R> {
+import java.io.IOException;
+import java.util.UUID;
 
-    public R process(ExecutionPhase phase, C context) {
-        return phase.accept(this, context);
+public abstract class ExecutionPhaseBase implements ExecutionPhase {
+
+    protected UUID jobId;
+    protected int executionPhaseId;
+
+    @Override
+    public int executionPhaseId() {
+        return executionPhaseId;
     }
 
-    protected R visitExecutionPhase(ExecutionPhase phase, C context) {
-        return null;
+    @Override
+    public UUID jobId() {
+        return jobId;
     }
 
-    public R visitCollectPhase(CollectPhase phase, C context) {
-        return visitExecutionPhase(phase, context);
+    @Override
+    public void readFrom(StreamInput in) throws IOException {
+        jobId = new UUID(in.readLong(), in.readLong());
+        executionPhaseId = in.readVInt();
     }
 
-    public R visitMergePhase(MergePhase phase, C context) {
-        return visitExecutionPhase(phase, context);
-    }
-
-    public R visitCountPhase(CountPhase phase, C context) {
-        return visitExecutionPhase(phase, context);
-    }
-
-    public R visitFetchPhase(FetchPhase phase, C context) {
-        return visitExecutionPhase(phase, context);
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        assert jobId != null : "jobId must not be null";
+        out.writeLong(jobId.getMostSignificantBits());
+        out.writeLong(jobId.getLeastSignificantBits());
+        out.writeVInt(executionPhaseId);
     }
 }

@@ -24,7 +24,7 @@ package io.crate.planner.node.dql;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
-import io.crate.planner.node.ExecutionPhase;
+import io.crate.planner.node.ExecutionPhaseBase;
 import io.crate.planner.projection.Projection;
 import io.crate.planner.symbol.Symbols;
 import io.crate.types.DataType;
@@ -38,10 +38,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, ExecutionPhase {
+public abstract class AbstractDQLPlanPhase extends ExecutionPhaseBase implements DQLPlanNode, Streamable {
 
-    private UUID jobId;
-    private int executionPhaseId;
     private String name;
     protected List<Projection> projections = ImmutableList.of();
     protected List<DataType> outputTypes = ImmutableList.of();
@@ -59,16 +57,6 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
 
     public String name() {
         return name;
-    }
-
-    @Override
-    public UUID jobId() {
-        return jobId;
-    }
-
-    @Override
-    public int executionPhaseId() {
-        return executionPhaseId;
     }
 
     public boolean hasProjections() {
@@ -103,8 +91,7 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
     @Override
     public void readFrom(StreamInput in) throws IOException {
         name = in.readString();
-        jobId = new UUID(in.readLong(), in.readLong());
-        executionPhaseId = in.readVInt();
+        super.readFrom(in);
 
         int numCols = in.readVInt();
         if (numCols > 0) {
@@ -127,10 +114,7 @@ public abstract class AbstractDQLPlanPhase implements DQLPlanNode, Streamable, E
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeString(name);
-        assert jobId != null : "jobId must not be null";
-        out.writeLong(jobId.getMostSignificantBits());
-        out.writeLong(jobId.getLeastSignificantBits());
-        out.writeVInt(executionPhaseId);
+        super.writeTo(out);
 
         int numCols = outputTypes.size();
         out.writeVInt(numCols);

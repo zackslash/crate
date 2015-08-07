@@ -25,10 +25,7 @@ import com.google.common.collect.Sets;
 import io.crate.Constants;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.QuerySpec;
-import io.crate.analyze.relations.AnalyzedRelation;
-import io.crate.analyze.relations.AnalyzedRelationVisitor;
-import io.crate.analyze.relations.PlannedAnalyzedRelation;
-import io.crate.analyze.relations.QueriedDocTable;
+import io.crate.analyze.relations.*;
 import io.crate.exceptions.VersionInvalidException;
 import io.crate.metadata.*;
 import io.crate.metadata.doc.DocSysColumns;
@@ -105,10 +102,24 @@ public class QueryThenFetchConsumer implements Consumer {
                 return null;
             }
 
-            PlannedAnalyzedRelation plannedSubQuery = consumingPlanner.plan(statement.subQueryRelation(), context);
+            List<OutputName> outputNames = new ArrayList<>(pushedDownSpec.outputs().size());
+            for (Symbol symbol : pushedDownSpec.outputs()) {
+                // TOOD: outputnamevisitor?
+                outputNames.add(new OutputName(""));
+            }
+
+            QueriedDocTable subRelation = new QueriedDocTable(
+                    new DocTableRelation(table.tableRelation().tableInfo()),
+                    outputNames,
+                    pushedDownSpec
+            );
+            PlannedAnalyzedRelation plannedSubQuery = context.plannerContext().planSubRelation(subRelation, context);
             if (plannedSubQuery == null) {
                 return null;
             }
+
+
+            // TODO: build FetchProjection here
 
 
             boolean outputsAreAllOrdered = false;
