@@ -29,37 +29,47 @@ public class MultiUpstreamRowUpstream implements RowUpstream {
     private static final ESLogger LOGGER = Loggers.getLogger(MultiUpstreamRowUpstream.class);
 
     private final MultiUpstreamRowDownstream multiUpstreamRowDownstream;
+    private final Object lock = new Object();
 
     public MultiUpstreamRowUpstream(MultiUpstreamRowDownstream multiUpstreamRowDownstream) {
         this.multiUpstreamRowDownstream = multiUpstreamRowDownstream;
+        LOGGER.setLevel("trace");
     }
 
     @Override
     public void pause() {
-        if (multiUpstreamRowDownstream.upstreamsRunning()) {
-            for (RowUpstream upstream : multiUpstreamRowDownstream.upstreams()) {
-                upstream.pause();
+        synchronized (lock) {
+            if (multiUpstreamRowDownstream.upstreamsRunning()) {
+                for (RowUpstream upstream : multiUpstreamRowDownstream.upstreams()) {
+                    upstream.pause();
+                }
             }
         }
     }
 
     @Override
     public void resume(boolean async) {
+        //noinspection ThrowableResultOfMethodCallIgnored
         if (multiUpstreamRowDownstream.failure() != null) {
             LOGGER.trace("A failure occurred, will not resume.");
             return;
         }
         if (multiUpstreamRowDownstream.upstreamsRunning()) {
-            int i = 1;
-            for (RowUpstream upstream : multiUpstreamRowDownstream.upstreams()) {
-                if (async && i == multiUpstreamRowDownstream.upstreams().size()) {
-                    // last upstream is started synchronous
-                    upstream.resume(false);
-                } else {
-                    upstream.resume(async);
+            LOGGER.trace("calling resume on all upstreams");
+            synchronized (lock) {
+                int i = 1;
+                for (RowUpstream upstream : multiUpstreamRowDownstream.upstreams()) {
+                    if (async && i == multiUpstreamRowDownstream.upstreams().size()) {
+                        // last upstream is started synchronous
+                        upstream.resume(false);
+                    } else {
+                        upstream.resume(async);
+                    }
+                    i++;
                 }
-                i++;
             }
+        } else {
+            LOGGER.trace("All upstreams finished, will not resume");
         }
    }
 }

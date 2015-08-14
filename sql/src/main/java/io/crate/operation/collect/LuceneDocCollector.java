@@ -101,7 +101,7 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
     private boolean visitorEnabled = false;
     private AtomicReader currentReader;
     protected int rowCount = 0;
-    private volatile boolean pendingPause = false;
+    private final AtomicBoolean pendingPause = new AtomicBoolean(false);
     private InternalCollectContext internalCollectContext;
     private int currentDocBase = 0;
 
@@ -120,6 +120,7 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
         this.inputRow = new InputRow(inputs);
         this.collectorExpressions = collectorExpressions;
         this.fieldsVisitor = new CollectorFieldsVisitor(collectorExpressions.size());
+        LOGGER.setLevel("trace");
     }
 
     @Override
@@ -229,7 +230,6 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
         searchContext.searcher().inStage(ContextIndexSearcher.Stage.MAIN_QUERY);
 
         Query query = searchContext.query();
-        LOGGER.trace("query {}", query);
         assert query != null : "query must not be null";
 
         buildContext(query);
@@ -288,13 +288,16 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
 
     @Override
     public void pause() {
-        pendingPause = true;
+        pendingPause.set(true);
     }
 
     @Override
     public void resume(boolean async) {
         if (paused.compareAndSet(true, false)) {
+            LOGGER.trace("resuming, async? {}", async);
             if (!async) {
+                SearchContext.setCurrent(searchContext);
+                searchContext.searcher().inStage(ContextIndexSearcher.Stage.MAIN_QUERY);
                 innerCollect();
             } else {
                 try {
@@ -314,14 +317,14 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
             }
         } else {
             LOGGER.trace("Collector was not paused and so will not resume");
-            pendingPause = false;
+            pendingPause.set(false);
         }
     }
 
     public boolean shouldPause() {
-        if (pendingPause) {
+        if (pendingPause.compareAndSet(true, false)) {
             paused.set(true);
-            pendingPause = false;
+            //pendingPause = false;
             return true;
         }
         return false;

@@ -90,13 +90,13 @@ public abstract class ResultProviderBase implements ResultProvider {
 
     @Override
     public void pause() {
-        isPaused = true;
         multiUpstreamRowUpstream.pause();
+        isPaused = true;
     }
 
     @Override
     public void resume(boolean async) {
-        multiUpstreamRowUpstream.resume(async);
         isPaused = false;
+        multiUpstreamRowUpstream.resume(async);
     }
 }

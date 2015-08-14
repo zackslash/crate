@@ -130,7 +130,7 @@ public class PageDownstreamContext implements DownstreamExecutionSubContext, Exe
         // can't trigger failure on pageDownstream immediately as it would remove the context which the other
         // upstreams still require
         synchronized (lock) {
-            LOGGER.trace("failure: bucket: {} {}", bucketIdx, throwable);
+            LOGGER.error("failure: bucket: {} {}", bucketIdx, throwable);
             if (allFuturesSet.get(bucketIdx)) {
                 pageDownstream.fail(new IllegalStateException("May not set the same bucket %d of a page more than once"));
                 return;

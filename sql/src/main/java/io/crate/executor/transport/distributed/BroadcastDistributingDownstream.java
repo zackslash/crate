@@ -51,6 +51,7 @@ public class BroadcastDistributingDownstream extends DistributingDownstream {
         super(jobId, targetExecutionNodeId, inputId, bucketIdx, downstreamNodeIds,
                 transportDistributedResultAction, streamers, settings, pageSize);
         bucketBuilder = new StreamBucket.Builder(streamers);
+        LOGGER.setLevel("trace");
     }
 
     private Bucket consumePage() throws Exception {

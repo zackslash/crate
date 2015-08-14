@@ -31,6 +31,7 @@ import org.elasticsearch.common.settings.Settings;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -53,6 +54,7 @@ public abstract class DistributingDownstream extends ResultProviderBase {
     protected final BlockingQueue<Row> rowQueue;
     protected final Downstream[] downstreams;
     protected final int pageSize;
+    private final List<Row> upstreamsRowCache = new ArrayList<>();
     private volatile boolean killed = false;
 
     public DistributingDownstream(UUID jobId,
@@ -91,26 +93,31 @@ public abstract class DistributingDownstream extends ResultProviderBase {
             return false;
         }
 
-        try {
-            Row materializedRow = new RowN(row.materialize());
+        if (logger().isTraceEnabled() && isPaused) {
+            logger().trace("receiving row but isPaused is set");
+        }
+
+        Row materializedRow = new RowN(row.materialize());
             if (!rowQueue.offer(materializedRow)) {
+                if (!isPaused) {
+                    logger().trace("row queue is full, will pause");
+                    pause();
+                }
                 // should not happen, we must pause instead of block
-                logger().warn("row queue is full, will block until a slot is available!");
-                rowQueue.put(materializedRow);
+                logger().trace("row queue is full, will cache row");
+                synchronized (upstreamsRowCache) {
+                    upstreamsRowCache.add(materializedRow);
+                }
+                return true;
             }
-            if (allDownstreamsFinished()) {
-                // in case the Q just got unblocked from a response with needMore=false
-                return false;
-            }
-            sendRequestsIfNeeded();
-            if (rowQueue.remainingCapacity() == 0) {
-                logger().trace("row queue is full, will pause");
-                pause();
-                return false;
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (allDownstreamsFinished()) {
+            // in case the Q just got unblocked from a response with needMore=false
             return false;
+        }
+        sendRequestsIfNeeded();
+        if (rowQueue.remainingCapacity() == 0) {
+            logger().trace("row queue is full, will pause");
+            pause();
         }
         return true;
     }
@@ -135,8 +142,14 @@ public abstract class DistributingDownstream extends ResultProviderBase {
     }
 
     private void drainPageFromQueue() {
-        currentPage.clear();
-        rowQueue.drainTo(currentPage, pageSize);
+        synchronized (upstreamsRowCache) {
+            currentPage.clear();
+            rowQueue.drainTo(currentPage, pageSize);
+            if (upstreamsRowCache.size() > 0) {
+                rowQueue.addAll(upstreamsRowCache);
+                upstreamsRowCache.clear();
+            }
+        }
     }
 
     private boolean fullPageInQueue() {
@@ -163,6 +176,7 @@ public abstract class DistributingDownstream extends ResultProviderBase {
 
     @Override
     public Bucket doFinish() {
+        logger().trace("finished");
         onAllUpstreamsFinished();
         return null;
     }
@@ -199,7 +213,7 @@ public abstract class DistributingDownstream extends ResultProviderBase {
 
         if (needMore && !lastPageSent.get() && !killed) {
             sendRequestsIfNeeded();
-            if (isPaused && rowQueue.remainingCapacity() > 0) {
+            if (!lastPageSent.get() && isPaused && rowQueue.remainingCapacity() > 0) {
                 logger().trace("row queue is drained, will resume");
                 try {
                     resume(multiUpstreamRowDownstream.upstreams().size() > 1);
@@ -278,7 +292,7 @@ public abstract class DistributingDownstream extends ResultProviderBase {
         @Override
         public void onResponse(DistributedResultResponse response) {
             if (logger().isTraceEnabled()) {
-                logger().trace("[{}] successfully sent distributing result request to {} {} input {}, needMore? {}",
+                logger().trace("[{}] successfully sent distributing result request to {} on node {} input {}, needMore? {}",
                          jobId,
                          targetExecutionPhaseId,
                          node,
