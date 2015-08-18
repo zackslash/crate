@@ -28,6 +28,22 @@ import io.crate.core.collections.Row;
  */
 public interface RowDownstreamHandle {
 
+    RowDownstreamHandle NO_OP_HANDLE = new RowDownstreamHandle() {
+        @Override
+        public boolean setNextRow(Row row) {
+            return false;
+        }
+
+        @Override
+        public void finish() {
+
+        }
+
+        @Override
+        public void fail(Throwable throwable) {
+
+        }
+    };
 
     /**
      * Feed the downstream with the next input row.

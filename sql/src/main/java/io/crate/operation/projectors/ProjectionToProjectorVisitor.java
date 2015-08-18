@@ -25,10 +25,15 @@ import io.crate.analyze.EvaluatingNormalizer;
 import io.crate.breaker.RamAccountingContext;
 import io.crate.core.collections.Row;
 import io.crate.executor.transport.TransportActionProvider;
+import io.crate.jobs.ExecutionState;
 import io.crate.metadata.ColumnIdent;
 import io.crate.operation.ImplementationSymbolVisitor;
 import io.crate.operation.Input;
+import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.collect.CollectExpression;
+import io.crate.operation.handles.FilterHandle;
+import io.crate.operation.handles.HandleFactory;
+import io.crate.operation.handles.ProxyProjector;
 import io.crate.planner.consumer.OrderByPositionVisitor;
 import io.crate.planner.projection.*;
 import io.crate.planner.symbol.*;
@@ -294,16 +299,21 @@ public class ProjectionToProjectorVisitor
 
     @Override
     public Projector visitFilterProjection(FilterProjection projection, Context context) {
-        ImplementationSymbolVisitor.Context ctx = new ImplementationSymbolVisitor.Context();
+        final ImplementationSymbolVisitor.Context ctx = new ImplementationSymbolVisitor.Context();
 
-        Input<Boolean> condition;
+        final Input<Boolean> condition;
         if (projection.query() != null) {
             condition = (Input)symbolVisitor.process(projection.query(), ctx);
         } else {
             condition = Literal.newLiteral(true);
         }
 
-        return new FilterProjector(ctx.collectExpressions(), condition);
+        return new ProxyProjector(new HandleFactory() {
+            @Override
+            public RowDownstreamHandle create(ExecutionState executionState, RowDownstreamHandle rowDownstreamHandle) {
+                return new FilterHandle(rowDownstreamHandle, ctx.collectExpressions(), condition);
+            }
+        });
     }
 
     @Override
