@@ -31,6 +31,8 @@ import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.RowUpstream;
 import io.crate.test.integration.CrateUnitTest;
 import io.crate.testing.CollectingProjector;
+import io.crate.testing.RowCollectionBucket;
+import io.crate.testing.TestingHelpers;
 import org.elasticsearch.common.util.concurrent.EsRejectedExecutionException;
 import org.hamcrest.Matchers;
 import org.junit.Rule;
@@ -41,7 +43,6 @@ import org.mockito.Mockito;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -73,16 +74,16 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
     @Test
     public void testMergeOnPagingIteratorIsCalledAfterALLBucketsAreReady() throws Exception {
         IteratorPageDownstream downstream = new IteratorPageDownstream(
-                new CollectingProjector(), mockedPagingIterator, Optional.<Executor>absent(), false);
+                new CollectingProjector(), mockedPagingIterator, Optional.<Executor>absent());
 
         SettableFuture<Bucket> b1 = SettableFuture.create();
         SettableFuture<Bucket> b2 = SettableFuture.create();
         downstream.nextPage(new BucketPage(ImmutableList.of(b1, b2)), PAGE_CONSUME_LISTENER);
-        verify(mockedPagingIterator, times(0)).merge(Mockito.<Iterable<? extends Iterator<Row>>>any());
+        verify(mockedPagingIterator, times(0)).merge(Mockito.<Iterable<? extends Iterable<Row>>>any());
         b1.set(Bucket.EMPTY);
-        verify(mockedPagingIterator, times(0)).merge(Mockito.<Iterable<? extends Iterator<Row>>>any());
+        verify(mockedPagingIterator, times(0)).merge(Mockito.<Iterable<? extends Iterable<Row>>>any());
         b2.set(Bucket.EMPTY);
-        verify(mockedPagingIterator, times(1)).merge(Mockito.<Iterable<? extends Iterator<Row>>>any());
+        verify(mockedPagingIterator, times(1)).merge(Mockito.<Iterable<? extends Iterable<Row>>>any());
     }
 
     @Test
@@ -92,7 +93,7 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
 
         CollectingProjector collectingProjector = new CollectingProjector();
         IteratorPageDownstream downstream = new IteratorPageDownstream(
-                collectingProjector, mockedPagingIterator, Optional.<Executor>absent(), false);
+                collectingProjector, mockedPagingIterator, Optional.<Executor>absent());
 
         SettableFuture<Bucket> b1 = SettableFuture.create();
         downstream.nextPage(new BucketPage(ImmutableList.of(b1)), PAGE_CONSUME_LISTENER);
@@ -110,7 +111,7 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
             }
         };
         IteratorPageDownstream downstream = new IteratorPageDownstream(
-                rowDownstream, mockedPagingIterator, Optional.<Executor>absent(), false);
+                rowDownstream, mockedPagingIterator, Optional.<Executor>absent());
 
         downstream.finish();
         downstream.finish();
@@ -125,13 +126,13 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
 
          IteratorPageDownstream pageDownstream = new IteratorPageDownstream(
                  rowDownstream,
-                 new PassThroughPagingIterator<Row>(),
+                 PassThroughPagingIterator.<Row>oneShot(),
                  Optional.<Executor>of(new Executor() {
                      @Override
                      public void execute(@Nonnull Runnable command) {
                          throw new EsRejectedExecutionException("HAHA !");
                      }
-                 }), false);
+                 }));
 
          SettableFuture<Bucket> b1 = SettableFuture.create();
          b1.set(Bucket.EMPTY);
@@ -154,9 +155,8 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
         CollectingProjector rowDownstream = new CollectingProjector();
         IteratorPageDownstream pageDownstream = new IteratorPageDownstream(
                 rowDownstream,
-                new PassThroughPagingIterator<Row>(),
-                Optional.<Executor>absent(),
-                true);
+                PassThroughPagingIterator.<Row>repeatable(),
+                Optional.<Executor>absent());
 
         SettableFuture<Bucket> b1 = SettableFuture.create();
         b1.set(new ArrayBucket(
@@ -171,7 +171,19 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
         pageDownstream.finish();
         pageDownstream.repeat();
         pageDownstream.finish();
-        assertThat(rowDownstream.result().get(20, TimeUnit.MILLISECONDS).size(), is(12));
+        assertThat(TestingHelpers.printedTable(rowDownstream.result().get(20, TimeUnit.MILLISECONDS)), is(
+                "a\n" +
+                "b\n" +
+                "c\n" +
+                "a\n" +
+                "b\n" +
+                "c\n" +
+                "a\n" +
+                "b\n" +
+                "c\n" +
+                "a\n" +
+                "b\n" +
+                "c\n"));
     }
 
     @Test
@@ -207,9 +219,8 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
         };
         IteratorPageDownstream pageDownstream = new IteratorPageDownstream(
                 rowDownstream,
-                new PassThroughPagingIterator<Row>(),
-                Optional.<Executor>absent(),
-                false);
+                PassThroughPagingIterator.<Row>repeatable(),
+                Optional.<Executor>absent());
 
         SettableFuture<Bucket> b1 = SettableFuture.create();
         b1.set(new ArrayBucket(
@@ -223,5 +234,18 @@ public class IteratorPageDownstreamTest extends CrateUnitTest {
         assertThat(collectedRows.size(), is(2));
         pageDownstream.resume(false);
         assertThat(collectedRows.size(), is(3));
+
+        pageDownstream.finish();
+        pageDownstream.repeat();
+
+        assertThat(TestingHelpers.printedTable(new RowCollectionBucket(collectedRows)), is(
+                "a\n" +
+                "b\n" +
+                "c\n" +
+                "a\n" +
+                "b\n" +
+                "c\n"));
+
+
     }
 }
