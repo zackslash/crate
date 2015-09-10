@@ -21,9 +21,12 @@
 
 package io.crate.operation.join;
 
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import io.crate.core.collections.Row;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowUpstream;
+import io.crate.operation.projectors.ListenableRowReceiver;
 import io.crate.operation.projectors.RowReceiver;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
@@ -37,8 +40,8 @@ public class NestedLoopOperation implements RowUpstream {
     private final RightRowReceiver rightRowReceiver;
     private final Object mutex = new Object();
 
-    private RowUpstream leftUpstream;
-    private RowUpstream rightUpstream;
+    private volatile RowUpstream leftUpstream;
+    private volatile RowUpstream rightUpstream;
 
     private RowReceiver downstream;
     private volatile boolean leftFinished = false;
@@ -54,11 +57,11 @@ public class NestedLoopOperation implements RowUpstream {
     }
 
 
-    public RowReceiver leftRowReceiver() {
+    public ListenableRowReceiver leftRowReceiver() {
         return leftRowReceiver;
     }
 
-    public RowReceiver rightRowReceiver() {
+    public ListenableRowReceiver rightRowReceiver() {
         return rightRowReceiver;
     }
 
@@ -115,9 +118,11 @@ public class NestedLoopOperation implements RowUpstream {
         }
     }
 
-    private class LeftRowReceiver implements RowReceiver {
+    private class LeftRowReceiver implements ListenableRowReceiver {
 
         private Row lastRow;
+
+        private final SettableFuture<Void> finished = SettableFuture.create();
 
         @Override
         public boolean setNextRow(Row row) {
@@ -140,6 +145,7 @@ public class NestedLoopOperation implements RowUpstream {
                 leftFinished = true;
                 if (rightFinished) {
                     downstream.finish();
+                    finished.set(null);
                 } else {
                     rightUpstream.resume(false);
                 }
@@ -150,27 +156,40 @@ public class NestedLoopOperation implements RowUpstream {
         @Override
         public void fail(Throwable throwable) {
             downstream.fail(throwable);
+            finished.setException(throwable);
         }
 
         @Override
         public void prepare(ExecutionState executionState) {
+        }
 
+        @Override
+        public boolean requiresRepeatSupport() {
+            return true;
         }
 
         @Override
         public void setUpstream(RowUpstream rowUpstream) {
+            assert rowUpstream != null : "rowUpstream must not be null";
             leftUpstream = rowUpstream;
+        }
+
+        @Override
+        public ListenableFuture<Void> finishFuture() {
+            return finished;
         }
     }
 
-    private class RightRowReceiver implements RowReceiver {
+    private class RightRowReceiver implements ListenableRowReceiver {
+
+        private final SettableFuture<Void> finished = SettableFuture.create();
 
         Row lastRow = null;
 
         boolean receivedRows = false;
         boolean leftIsPaused = false;
 
-        public RightRowReceiver() {
+        RightRowReceiver() {
         }
 
         @Override
@@ -196,7 +215,13 @@ public class NestedLoopOperation implements RowUpstream {
             return emitRow(rightRow);
         }
 
-        private boolean emitRow(Row row) {
+
+        @Override
+        public ListenableFuture<Void> finishFuture() {
+            return finished;
+        }
+
+        private synchronized boolean emitRow(Row row) {
             combinedRow.outerRow = leftRowReceiver.lastRow;
             combinedRow.innerRow = row;
             boolean wantsMore = downstream.setNextRow(combinedRow);
@@ -210,6 +235,7 @@ public class NestedLoopOperation implements RowUpstream {
                 rightFinished = true;
                 if (leftFinished) {
                     downstream.finish();
+                    finished.set(null);
                 } else {
                     leftUpstream.resume(false);
                 }
@@ -219,6 +245,7 @@ public class NestedLoopOperation implements RowUpstream {
         @Override
         public void fail(Throwable throwable) {
             downstream.fail(throwable);
+            finished.setException(throwable);
         }
 
         @Override
@@ -226,7 +253,13 @@ public class NestedLoopOperation implements RowUpstream {
         }
 
         @Override
+        public boolean requiresRepeatSupport() {
+            return true;
+        }
+
+        @Override
         public void setUpstream(RowUpstream rowUpstream) {
+            assert rowUpstream != null : "rowUpstream must not be null";
             rightUpstream = rowUpstream;
         }
 

@@ -22,6 +22,7 @@
 package io.crate.operation.projectors;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 import io.crate.Constants;
 import io.crate.core.collections.Row;
 import io.crate.operation.Input;
@@ -85,11 +86,8 @@ public class SimpleTopNProjector extends AbstractProjector {
         downstream.fail(throwable);
     }
 
-    /**
-     * tells the RowUpstream that it should push all rows again
-     */
     @Override
-    public void repeat() {
-        throw new UnsupportedOperationException();
+    public boolean requiresRepeatSupport() {
+        return downstream.requiresRepeatSupport();
     }
 }

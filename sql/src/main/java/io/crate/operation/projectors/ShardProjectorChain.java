@@ -164,12 +164,20 @@ public class ShardProjectorChain {
         }
 
         if (maxNumShards == 1) {
-            rowDownstream = new SingleUpstreamRowDownstream(firstNodeProjector);
+            if (firstNodeProjector.requiresRepeatSupport()) {
+                rowDownstream = PassThroughRowMergers.rowMerger(firstNodeProjector);
+            } else {
+                rowDownstream = new SingleUpstreamRowDownstream(firstNodeProjector);
+            }
         } else if (orderBy == null || !orderBy.isSorted()) {
-            rowDownstream = new SynchronizingPassThroughRowMerger(firstNodeProjector);
+            rowDownstream = PassThroughRowMergers.rowMerger(firstNodeProjector);
         } else {
             assert outputs != null : "must have outputs if orderBy is present";
             int[] orderByPositions = OrderByPositionVisitor.orderByPositions(orderBy.orderBySymbols(), outputs);
+
+            if (firstNodeProjector.requiresRepeatSupport()) {
+                throw new UnsupportedOperationException("TODO");
+            }
             rowDownstream = new SortingRowMerger(firstNodeProjector, orderByPositions, orderBy.reverseFlags(), orderBy.nullsFirst());
         }
 

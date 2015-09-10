@@ -40,6 +40,11 @@ public abstract class ForwardingRowReceiver implements RowReceiver {
     }
 
     @Override
+    public boolean requiresRepeatSupport() {
+        return rowReceiver.requiresRepeatSupport();
+    }
+
+    @Override
     public void setUpstream(RowUpstream rowUpstream) {
         rowReceiver.setUpstream(rowUpstream);
     }
