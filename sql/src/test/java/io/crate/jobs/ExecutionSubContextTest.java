@@ -203,25 +203,4 @@ public class ExecutionSubContextTest extends CrateUnitTest {
                 SettableFuture.<TaskResult>create(),
                 mock(SymbolBasedTransportShardUpsertActionDelegate.class)));
     }
-
-    @Test
-    public void testParallelCloseNestedLoopContext() throws Throwable {
-        throw new AssertionError("TODO");
-        /*
-        verifyParallelClose(new NestedLoopContext(mock(NestedLoopPhase.class),
-                mock(RowReceiver.class), mock(RamAccountingContext.class),
-                mock(PageDownstreamFactory.class), mock(ThreadPool.class)));
-                */
-    }
-
-    @Test
-    public void testParallelKillNestedLoopContext() throws Throwable {
-        throw new AssertionError("TODO");
-        /*
-        verifyParallelKill(new NestedLoopContext(mock(NestedLoopPhase.class),
-                mock(RowReceiver.class), mock(RamAccountingContext.class),
-                mock(PageDownstreamFactory.class), mock(ThreadPool.class)));
-                */
-    }
-
 }

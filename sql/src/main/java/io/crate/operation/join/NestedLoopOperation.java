@@ -24,6 +24,7 @@ package io.crate.operation.join;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.crate.core.collections.Row;
+import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowUpstream;
 import io.crate.operation.projectors.ListenableRowReceiver;
@@ -39,9 +40,6 @@ public class NestedLoopOperation implements RowUpstream {
     private final LeftRowReceiver leftRowReceiver;
     private final RightRowReceiver rightRowReceiver;
     private final Object mutex = new Object();
-
-    private volatile RowUpstream leftUpstream;
-    private volatile RowUpstream rightUpstream;
 
     private RowReceiver downstream;
     private volatile boolean leftFinished = false;
@@ -82,8 +80,8 @@ public class NestedLoopOperation implements RowUpstream {
 
     static class CombinedRow implements Row {
 
-        Row outerRow;
-        Row innerRow;
+        volatile Row outerRow;
+        volatile Row innerRow;
 
         @Override
         public int size() {
@@ -118,49 +116,14 @@ public class NestedLoopOperation implements RowUpstream {
         }
     }
 
-    private class LeftRowReceiver implements ListenableRowReceiver {
+    private abstract class AbstractRowReceiver implements ListenableRowReceiver {
 
-        private Row lastRow;
-
-        private final SettableFuture<Void> finished = SettableFuture.create();
-
-        @Override
-        public boolean setNextRow(Row row) {
-            LOGGER.trace("left downstream received a row {}", row);
-
-            synchronized (mutex) {
-                if (rightFinished && (!rightRowReceiver.receivedRows || !downstreamWantsMore)) {
-                    return false;
-                }
-                lastRow = row;
-                leftUpstream.pause();
-                rightRowReceiver.leftIsPaused = true;
-            }
-            return rightRowReceiver.resume();
-        }
+        final SettableFuture<Void> finished = SettableFuture.create();
+        volatile RowUpstream upstream;
 
         @Override
-        public void finish() {
-            synchronized (mutex) {
-                leftFinished = true;
-                if (rightFinished) {
-                    downstream.finish();
-                    finished.set(null);
-                } else {
-                    rightUpstream.resume(false);
-                }
-            }
-            LOGGER.debug("left downstream finished");
-        }
-
-        @Override
-        public void fail(Throwable throwable) {
-            downstream.fail(throwable);
-            finished.setException(throwable);
-        }
-
-        @Override
-        public void prepare(ExecutionState executionState) {
+        public ListenableFuture<Void> finishFuture() {
+            return finished;
         }
 
         @Override
@@ -169,32 +132,68 @@ public class NestedLoopOperation implements RowUpstream {
         }
 
         @Override
-        public void setUpstream(RowUpstream rowUpstream) {
-            assert rowUpstream != null : "rowUpstream must not be null";
-            leftUpstream = rowUpstream;
+        public void prepare(ExecutionState executionState) {
         }
 
         @Override
-        public ListenableFuture<Void> finishFuture() {
-            return finished;
+        public void setUpstream(RowUpstream rowUpstream) {
+            assert rowUpstream != null : "rowUpstream must not be null";
+            this.upstream = rowUpstream;
         }
     }
 
-    private class RightRowReceiver implements ListenableRowReceiver {
+    private class LeftRowReceiver extends AbstractRowReceiver {
 
-        private final SettableFuture<Void> finished = SettableFuture.create();
+        private volatile Row lastRow = null;
 
-        Row lastRow = null;
+        @Override
+        public boolean setNextRow(Row row) {
+            LOGGER.trace("LEFT downstream received a row {}", row);
+
+            synchronized (mutex) {
+                if (rightFinished && (!rightRowReceiver.receivedRows || !downstreamWantsMore)) {
+                    return false;
+                }
+                LOGGER.trace("LEFT pausing; resuming right");
+                lastRow = new RowN(row.materialize());
+                upstream.pause();
+                rightRowReceiver.leftIsPaused = true;
+            }
+            return rightRowReceiver.resume();
+        }
+
+        @Override
+        public void finish() {
+            LOGGER.debug("LEFT downstream finished");
+            synchronized (mutex) {
+                leftFinished = true;
+                finished.set(null);
+                if (rightFinished) {
+                    LOGGER.debug("both downstreams finished");
+                    downstream.finish();
+                } else {
+                    rightRowReceiver.upstream.resume(false);
+                }
+            }
+        }
+
+        @Override
+        public void fail(Throwable throwable) {
+            downstream.fail(throwable);
+            finished.setException(throwable);
+        }
+    }
+
+    private class RightRowReceiver extends AbstractRowReceiver {
+
+        volatile Row lastRow = null;
 
         boolean receivedRows = false;
         boolean leftIsPaused = false;
 
-        RightRowReceiver() {
-        }
-
         @Override
         public boolean setNextRow(final Row rightRow) {
-            LOGGER.trace("right downstream received a row {}", rightRow);
+            LOGGER.trace("RIGHT downstream received a row {}", rightRow);
             receivedRows = true;
 
 
@@ -207,21 +206,17 @@ public class NestedLoopOperation implements RowUpstream {
                     if (leftFinished) {
                         return false;
                     }
-                    lastRow = rightRow;
-                    rightUpstream.pause();
+                    lastRow = new RowN(rightRow.materialize());
+                    LOGGER.trace("calling pause on right upstream");
+                    upstream.pause();
                     return true;
                 }
             }
             return emitRow(rightRow);
         }
 
-
-        @Override
-        public ListenableFuture<Void> finishFuture() {
-            return finished;
-        }
-
         private synchronized boolean emitRow(Row row) {
+            LOGGER.trace("## NL emits row to downstream");
             combinedRow.outerRow = leftRowReceiver.lastRow;
             combinedRow.innerRow = row;
             boolean wantsMore = downstream.setNextRow(combinedRow);
@@ -231,13 +226,16 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public void finish() {
+            LOGGER.debug("RIGHT downstream finished");
             synchronized (mutex) {
                 rightFinished = true;
+                finished.set(null);
                 if (leftFinished) {
+                    LOGGER.debug("both downstreams finished");
                     downstream.finish();
-                    finished.set(null);
                 } else {
-                    leftUpstream.resume(false);
+                    LOGGER.debug("NL: Resume left upstream");
+                    leftRowReceiver.upstream.resume(false);
                 }
             }
         }
@@ -248,22 +246,7 @@ public class NestedLoopOperation implements RowUpstream {
             finished.setException(throwable);
         }
 
-        @Override
-        public void prepare(ExecutionState executionState) {
-        }
-
-        @Override
-        public boolean requiresRepeatSupport() {
-            return true;
-        }
-
-        @Override
-        public void setUpstream(RowUpstream rowUpstream) {
-            assert rowUpstream != null : "rowUpstream must not be null";
-            rightUpstream = rowUpstream;
-        }
-
-        public boolean resume() {
+        boolean resume() {
             if (lastRow != null) {
                 boolean wantMore = emitRow(lastRow);
                 if (!wantMore) {
@@ -274,12 +257,14 @@ public class NestedLoopOperation implements RowUpstream {
 
             if (rightFinished) {
                 if (receivedRows) {
-                    rightUpstream.repeat();
+                    LOGGER.debug("RIGHT: calling repeat");
+                    upstream.repeat();
                 } else {
                     return false;
                 }
             } else {
-                rightUpstream.resume(false);
+                LOGGER.debug("NL: Resume right upstream");
+                upstream.resume(false);
             }
             return true;
         }

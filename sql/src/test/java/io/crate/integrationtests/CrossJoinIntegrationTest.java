@@ -21,13 +21,11 @@
 
 package io.crate.integrationtests;
 
-import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import org.junit.Test;
 
 import static io.crate.testing.TestingHelpers.printedTable;
 import static org.hamcrest.core.Is.is;
 
-@Repeat(iterations = 100)
 public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
 
     @Test
@@ -77,10 +75,6 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
         execute("insert into t1 (price) values (20.3), (15.0)");
         execute("insert into t2 (price) values (28.3)");
         execute("refresh table t1, t2");
-        execute("select * from t1");
-        assertThat(response.rowCount(), is(2L));
-        execute("select * from t2");
-        assertThat(response.rowCount(), is(1L));
 
         execute("select round(t1.price * t2.price) as total_price from t1, t2 order by total_price");
         assertThat(printedTable(response.rows()), is("424\n574\n"));
@@ -138,6 +132,50 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
                 "1| foo\n" +
                 "2| bar\n" +
                 "2| foo\n"));
+    }
+
+    @Test
+    public void testCrossJoinSysTablesOnly() throws Exception {
+        execute("create table t (name string) clustered into 3 shards with (number_of_replicas = 0)");
+        ensureYellow();
+
+        execute("select s1.id, s2.id from sys.shards s1, sys.shards s2 order by s1.id asc, s2.id desc");
+        assertThat(response.rowCount(), is(9L));
+        assertThat(printedTable(response.rows()), is("" +
+                "0| 2\n" +
+                "0| 1\n" +
+                "0| 0\n" +
+                "1| 2\n" +
+                "1| 1\n" +
+                "1| 0\n" +
+                "2| 2\n" +
+                "2| 1\n" +
+                "2| 0\n"));
+    }
+
+    @Test
+    public void testCrossJoinFromInformationSchemaTable() throws Exception {
+        // sys table with doc granularity on single node
+        execute("select * from information_schema.schemata t1, information_schema.schemata t2 " +
+                "order by t1.schema_name, t2.schema_name");
+        assertThat(response.rowCount(), is(16L));
+        assertThat(printedTable(response.rows()), is("" +
+                "blob| blob\n" +
+                "blob| doc\n" +
+                "blob| information_schema\n" +
+                "blob| sys\n" +
+                "doc| blob\n" +
+                "doc| doc\n" +
+                "doc| information_schema\n" +
+                "doc| sys\n" +
+                "information_schema| blob\n" +
+                "information_schema| doc\n" +
+                "information_schema| information_schema\n" +
+                "information_schema| sys\n" +
+                "sys| blob\n" +
+                "sys| doc\n" +
+                "sys| information_schema\n" +
+                "sys| sys\n"));
     }
 
     private void createColorsAndSizes() {

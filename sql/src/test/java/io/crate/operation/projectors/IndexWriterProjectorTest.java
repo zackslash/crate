@@ -96,7 +96,7 @@ public class IndexWriterProjectorTest extends SQLTransportIntegrationTest {
                 UUID.randomUUID()
         );
         writerProjector.downstream(collectingRowReceiver);
-        final RowDownstream rowDownstream = PassThroughRowMergers.rowMerger(writerProjector);
+        final RowDownstream rowDownstream = RowMergers.passThroughRowMerger(writerProjector);
 
         final RowReceiver receiver1 = rowDownstream.newRowReceiver();
         receiver1.prepare(mock(ExecutionState.class));

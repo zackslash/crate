@@ -141,7 +141,7 @@ public class NestedLoopContext implements DownstreamExecutionSubContext, Executi
     private void doClose(@Nullable Throwable throwable) {
         if (!closed.getAndSet(true)) {
             if (activeSubContexts.get() == 0) {
-                callContextCallback();
+                callContextCallback(0);
             } else {
                 if (leftPageDownstreamContext != null) {
                     if (killed.get()) {
@@ -168,8 +168,8 @@ public class NestedLoopContext implements DownstreamExecutionSubContext, Executi
         }
     }
 
-    private boolean callContextCallback() {
-        if (activeSubContexts.get() == 0) {
+    private boolean callContextCallback(int activeSubContexts) {
+        if (activeSubContexts == 0) {
             if (killed.get()) {
                 callback.onKill();
             } else {
@@ -193,9 +193,8 @@ public class NestedLoopContext implements DownstreamExecutionSubContext, Executi
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("calling removal listener of subContext {}", inputId);
             }
-            activeSubContexts.decrementAndGet();
-
-            if (!callContextCallback() && t != null) {
+            int remainingSubContexts = activeSubContexts.decrementAndGet();
+            if (!callContextCallback(remainingSubContexts) && t != null) {
                 // kill other sub context
                 if (inputId == 0 && rightPageDownstreamContext != null) {
                     rightPageDownstreamContext.kill(t);
@@ -212,6 +211,7 @@ public class NestedLoopContext implements DownstreamExecutionSubContext, Executi
 
         @Override
         public void onSuccess(@Nullable Void result) {
+            LOGGER.trace("### on success");
             doClose(null);
         }
 

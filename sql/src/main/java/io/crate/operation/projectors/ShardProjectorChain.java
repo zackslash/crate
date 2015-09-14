@@ -31,6 +31,8 @@ import io.crate.planner.RowGranularity;
 import io.crate.planner.consumer.OrderByPositionVisitor;
 import io.crate.planner.projection.Projection;
 import io.crate.planner.symbol.Symbol;
+import org.elasticsearch.common.logging.ESLogger;
+import org.elasticsearch.common.logging.Loggers;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -69,6 +71,8 @@ import java.util.UUID;
  * </ul>
  */
 public class ShardProjectorChain {
+
+    private final static ESLogger LOGGER = Loggers.getLogger(ShardProjectorChain.class);
 
     private final UUID jobId;
     private final RamAccountingContext ramAccountingContext;
@@ -163,29 +167,34 @@ public class ShardProjectorChain {
             nodeProjectors.get(nodeProjectors.size()-1).downstream(finalDownstream);
         }
 
-        if (maxNumShards == 1) {
-            if (firstNodeProjector.requiresRepeatSupport()) {
-                rowDownstream = PassThroughRowMergers.rowMerger(firstNodeProjector);
-            } else {
-                rowDownstream = new SingleUpstreamRowDownstream(firstNodeProjector);
-            }
-        } else if (orderBy == null || !orderBy.isSorted()) {
-            rowDownstream = PassThroughRowMergers.rowMerger(firstNodeProjector);
-        } else {
-            assert outputs != null : "must have outputs if orderBy is present";
-            int[] orderByPositions = OrderByPositionVisitor.orderByPositions(orderBy.orderBySymbols(), outputs);
-
-            if (firstNodeProjector.requiresRepeatSupport()) {
-                throw new UnsupportedOperationException("TODO");
-            }
-            rowDownstream = new SortingRowMerger(firstNodeProjector, orderByPositions, orderBy.reverseFlags(), orderBy.nullsFirst());
-        }
+        rowDownstream = getRowDownstream(maxNumShards, outputs, orderBy);
 
         if (shardProjectionsIndex >= 0) {
             // shardProjector will be created later
             shardProjectors = new ArrayList<>((shardProjectionsIndex + 1) * maxNumShards);
         } else {
             shardProjectors = ImmutableList.of();
+        }
+    }
+
+    private RowDownstream getRowDownstream(int maxNumShards, @Nullable List<? extends Symbol> outputs, @Nullable OrderBy orderBy) {
+        if (maxNumShards == 1) {
+            LOGGER.debug("Getting RowDownstream for 1 upstream, repeat support: " + firstNodeProjector.requiresRepeatSupport());
+            if (firstNodeProjector.requiresRepeatSupport()) {
+                return RowMergers.passThroughRowMerger(firstNodeProjector);
+            } else {
+                return new SingleUpstreamRowDownstream(firstNodeProjector);
+            }
+        } else if (orderBy == null || !orderBy.isSorted()) {
+            LOGGER.debug("Getting RowDownstream for multiple upstreams; unsorted; repeat support: "
+                    + firstNodeProjector.requiresRepeatSupport());
+            return RowMergers.passThroughRowMerger(firstNodeProjector);
+        } else {
+            LOGGER.debug("Getting RowDownstream for multiple upstreams; sorted; repeat support: "
+                    + firstNodeProjector.requiresRepeatSupport());
+            assert outputs != null : "must have outputs if orderBy is present";
+            int[] orderByPositions = OrderByPositionVisitor.orderByPositions(orderBy.orderBySymbols(), outputs);
+            return RowMergers.sortingRowMerger(firstNodeProjector, orderByPositions, orderBy.reverseFlags(), orderBy.nullsFirst());
         }
     }
 

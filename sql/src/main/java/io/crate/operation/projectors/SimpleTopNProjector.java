@@ -22,7 +22,6 @@
 package io.crate.operation.projectors;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import io.crate.Constants;
 import io.crate.core.collections.Row;
 import io.crate.operation.Input;

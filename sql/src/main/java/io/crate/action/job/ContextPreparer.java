@@ -414,14 +414,14 @@ public class ContextPreparer {
                     flatProjectorChain,
                     nestedLoopOperation,
                     ramAccountingContext,
-                    pageDownstreamContext(
+                    pageDownstreamContextForNestedLoop(
                             phase.executionPhaseId(),
                             context,
                             (byte) 0,
                             phase.leftMergePhase(),
                             nestedLoopOperation.leftRowReceiver(),
                             ramAccountingContext),
-                    pageDownstreamContext(
+                    pageDownstreamContextForNestedLoop(
                             phase.executionPhaseId(),
                             context,
                             (byte) 1,
@@ -433,12 +433,12 @@ public class ContextPreparer {
         }
 
         @Nullable
-        private PageDownstreamContext pageDownstreamContext(int nlPhaseId,
-                                                            PreparerContext ctx,
-                                                            byte inputId,
-                                                            @Nullable MergePhase mergePhase,
-                                                            RowReceiver rowReceiver,
-                                                            RamAccountingContext ramAccountingContext) {
+        private PageDownstreamContext pageDownstreamContextForNestedLoop(int nlPhaseId,
+                                                                         PreparerContext ctx,
+                                                                         byte inputId,
+                                                                         @Nullable MergePhase mergePhase,
+                                                                         RowReceiver rowReceiver,
+                                                                         RamAccountingContext ramAccountingContext) {
             boolean upstreamOnSameNode = ctx.getPhaseHasSameNodeUpstream(nlPhaseId, inputId);
             if (upstreamOnSameNode) {
                 assert mergePhase == null : "if upstream is on same node the phase must be null";

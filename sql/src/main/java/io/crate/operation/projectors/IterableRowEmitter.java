@@ -43,12 +43,12 @@ public class IterableRowEmitter implements RowUpstream, Runnable {
 
     private final RowReceiver rowReceiver;
     private final ExecutionState executionState;
+    private final Iterable<? extends Row> rows;
+    private Iterator<? extends Row> rowsIt;
     private final Executor executor;
     private final AtomicBoolean paused = new AtomicBoolean(false);
-    private final Iterable<? extends Row> rows;
 
     private volatile boolean pendingPause = false;
-    private Iterator<? extends Row> rowsIt;
 
     public IterableRowEmitter(RowReceiver rowReceiver,
                               ExecutionState executionState,
