@@ -54,6 +54,7 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
     }
 
     @Test
+    @Repeat(iterations = 400)
     public void testInsertFromCrossJoin() throws Exception {
         createColorsAndSizes();
 

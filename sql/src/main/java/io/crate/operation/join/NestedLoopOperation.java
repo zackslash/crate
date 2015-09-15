@@ -24,6 +24,7 @@ package io.crate.operation.join;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.crate.core.collections.Row;
+import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowUpstream;
 import io.crate.operation.projectors.ListenableRowReceiver;
@@ -126,11 +127,6 @@ public class NestedLoopOperation implements RowUpstream {
         }
 
         @Override
-        public boolean requiresRepeatSupport() {
-            return true;
-        }
-
-        @Override
         public void prepare(ExecutionState executionState) {
         }
 
@@ -179,6 +175,11 @@ public class NestedLoopOperation implements RowUpstream {
             downstream.fail(throwable);
             finished.setException(throwable);
         }
+
+        @Override
+        public boolean requiresRepeatSupport() {
+            return false;
+        }
     }
 
     private class RightRowReceiver extends AbstractRowReceiver {
@@ -203,7 +204,7 @@ public class NestedLoopOperation implements RowUpstream {
                     if (leftFinished) {
                         return false;
                     }
-                    lastRow = rightRow;
+                    lastRow = new RowN(rightRow.materialize());
                     upstream.pause();
                     return true;
                 }
@@ -211,7 +212,7 @@ public class NestedLoopOperation implements RowUpstream {
             return emitRow(rightRow);
         }
 
-        private synchronized boolean emitRow(Row row) {
+        private boolean emitRow(Row row) {
             combinedRow.outerRow = leftRowReceiver.lastRow;
             combinedRow.innerRow = row;
             boolean wantsMore = downstream.setNextRow(combinedRow);
@@ -239,6 +240,11 @@ public class NestedLoopOperation implements RowUpstream {
             finished.setException(throwable);
         }
 
+        @Override
+        public boolean requiresRepeatSupport() {
+            return true;
+        }
+
         boolean resume() {
             if (lastRow != null) {
                 boolean wantMore = emitRow(lastRow);
@@ -246,6 +252,8 @@ public class NestedLoopOperation implements RowUpstream {
                     return false;
                 }
                 lastRow = null;
+            } else {
+                leftRowReceiver.lastRow = new RowN(leftRowReceiver.lastRow.materialize());
             }
 
             if (rightFinished) {
