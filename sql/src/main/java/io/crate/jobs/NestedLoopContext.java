@@ -211,7 +211,6 @@ public class NestedLoopContext implements DownstreamExecutionSubContext, Executi
 
         @Override
         public void onSuccess(@Nullable Void result) {
-            LOGGER.trace("### on success");
             doClose(null);
         }
 

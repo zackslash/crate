@@ -103,7 +103,7 @@ public class OrderedLuceneDocCollector extends LuceneDocCollector {
                 }
                 if (internalCollectContext.topFieldDocs.scoreDocs.length == 0) {
                     // no (more) hits
-                    return true;
+                    break;
                 }
                 internalCollectContext.topFieldPosition = 0;
 
@@ -112,7 +112,7 @@ public class OrderedLuceneDocCollector extends LuceneDocCollector {
                     setScorer(internalCollectContext.scorer);
                     scoreDoc = emitTopFieldDocs();
                 } else {
-                    return true;
+                    break;
                 }
             } else {
                 scoreDoc = emitTopFieldDocs();

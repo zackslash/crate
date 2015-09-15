@@ -278,12 +278,14 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
             } /// else = pause
         } catch (CollectionFinishedEarlyException e) {
             paused.set(false);
+            finished = true;
             downstream.finish();
         } catch (CollectionPauseException e) {
             // paused - do nothing
         } catch (Throwable e) {
             paused.set(false);
             searchContext.close();
+            finished = true;
             downstream.fail(e);
         } finally {
             finishCollect();

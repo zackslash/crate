@@ -24,7 +24,6 @@ package io.crate.operation.join;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.crate.core.collections.Row;
-import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowUpstream;
 import io.crate.operation.projectors.ListenableRowReceiver;
@@ -154,8 +153,7 @@ public class NestedLoopOperation implements RowUpstream {
                 if (rightFinished && (!rightRowReceiver.receivedRows || !downstreamWantsMore)) {
                     return false;
                 }
-                LOGGER.trace("LEFT pausing; resuming right");
-                lastRow = new RowN(row.materialize());
+                lastRow = row;
                 upstream.pause();
                 rightRowReceiver.leftIsPaused = true;
             }
@@ -164,12 +162,11 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public void finish() {
-            LOGGER.debug("LEFT downstream finished");
+            LOGGER.trace("LEFT downstream finished");
             synchronized (mutex) {
                 leftFinished = true;
                 finished.set(null);
                 if (rightFinished) {
-                    LOGGER.debug("both downstreams finished");
                     downstream.finish();
                 } else {
                     rightRowReceiver.upstream.resume(false);
@@ -206,8 +203,7 @@ public class NestedLoopOperation implements RowUpstream {
                     if (leftFinished) {
                         return false;
                     }
-                    lastRow = new RowN(rightRow.materialize());
-                    LOGGER.trace("calling pause on right upstream");
+                    lastRow = rightRow;
                     upstream.pause();
                     return true;
                 }
@@ -216,7 +212,6 @@ public class NestedLoopOperation implements RowUpstream {
         }
 
         private synchronized boolean emitRow(Row row) {
-            LOGGER.trace("## NL emits row to downstream");
             combinedRow.outerRow = leftRowReceiver.lastRow;
             combinedRow.innerRow = row;
             boolean wantsMore = downstream.setNextRow(combinedRow);
@@ -226,15 +221,13 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public void finish() {
-            LOGGER.debug("RIGHT downstream finished");
+            LOGGER.trace("RIGHT downstream finished");
             synchronized (mutex) {
                 rightFinished = true;
                 finished.set(null);
                 if (leftFinished) {
-                    LOGGER.debug("both downstreams finished");
                     downstream.finish();
                 } else {
-                    LOGGER.debug("NL: Resume left upstream");
                     leftRowReceiver.upstream.resume(false);
                 }
             }
@@ -257,13 +250,11 @@ public class NestedLoopOperation implements RowUpstream {
 
             if (rightFinished) {
                 if (receivedRows) {
-                    LOGGER.debug("RIGHT: calling repeat");
                     upstream.repeat();
                 } else {
                     return false;
                 }
             } else {
-                LOGGER.debug("NL: Resume right upstream");
                 upstream.resume(false);
             }
             return true;

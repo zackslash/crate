@@ -21,6 +21,7 @@
 
 package io.crate.integrationtests;
 
+import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import org.junit.Test;
 
 import static io.crate.testing.TestingHelpers.printedTable;
@@ -57,6 +58,7 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
         createColorsAndSizes();
 
         execute("create table target (color string, size string)");
+        ensureYellow();
         execute("insert into target (color, size) (select colors.name, sizes.name from colors cross join sizes)");
         execute("refresh table target");
 
@@ -72,6 +74,7 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
     public void testCrossJoinWithFunction() throws Exception {
         execute("create table t1 (price float)");
         execute("create table t2 (price float)");
+        ensureYellow();
         execute("insert into t1 (price) values (20.3), (15.0)");
         execute("insert into t2 (price) values (28.3)");
         execute("refresh table t1, t2");
@@ -84,6 +87,7 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
     public void testOrderByWithMixedRelationOrder() throws Exception {
         execute("create table t1 (price float)");
         execute("create table t2 (price float, name string)");
+        ensureYellow();
         execute("insert into t1 (price) values (20.3), (15.0)");
         execute("insert into t2 (price, name) values (28.3, 'foobar'), (40.1, 'bar')");
         execute("refresh table t1, t2");
@@ -120,6 +124,7 @@ public class CrossJoinIntegrationTest extends SQLTransportIntegrationTest {
     @Test
     public void testCrossJoinWithSysTable() throws Exception {
         execute("create table t (name string) clustered into 3 shards with (number_of_replicas = 0)");
+        ensureYellow();
         execute("insert into t values ('foo'), ('bar')");
         execute("refresh table t");
 

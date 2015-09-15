@@ -23,11 +23,9 @@
 package io.crate.operation.projectors;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import io.crate.core.collections.ArrayRow;
-import io.crate.core.collections.Buckets;
 import io.crate.core.collections.CollectionBucket;
 import io.crate.core.collections.Row;
 import io.crate.jobs.ExecutionState;
@@ -86,14 +84,6 @@ public class RowMergers {
             throw new UnsupportedOperationException("Doesn't cache rows");
         }
 
-        protected void onFinish() {
-            delegate.finish();
-        }
-
-        protected void onFail(Throwable t) {
-            delegate.fail(t);
-        }
-
         @Override
         public boolean setNextRow(Row row) {
             synchronized (lock) {
@@ -110,6 +100,20 @@ public class RowMergers {
         public final void fail(Throwable throwable) {
             failure.set(throwable);
             countdown();
+        }
+
+        /**
+         * triggered if the last remaining upstream finished or failed
+         */
+        protected void onFinish() {
+            delegate.finish();
+        }
+
+        /**
+         * triggered if the last remaining upstream finished or failed
+         */
+        protected void onFail(Throwable t) {
+            delegate.fail(t);
         }
 
         @Override
@@ -132,14 +136,14 @@ public class RowMergers {
             }
         }
 
-        protected void pause() {
+        protected final void pause() {
             paused = true;
             for (RowUpstream rowUpstream : rowUpstreams) {
                 rowUpstream.pause();
             }
         }
 
-        protected void resume(boolean async) {
+        protected final void resume(boolean async) {
             paused = false;
             for (RowUpstream rowUpstream : rowUpstreams) {
                 rowUpstream.resume(async);
@@ -147,19 +151,15 @@ public class RowMergers {
         }
 
         private void countdown() {
-            try {
-                int remainingUpstreams = activeUpstreams.decrementAndGet();
-                assert remainingUpstreams >= 0 : "activeUpstreams must not get negative: " + remainingUpstreams;
-                if (remainingUpstreams == 0) {
-                    Throwable t = failure.get();
-                    if (t == null) {
-                        onFinish();
-                    } else {
-                        onFail(t);
-                    }
+            int remainingUpstreams = activeUpstreams.decrementAndGet();
+            assert remainingUpstreams >= 0 : "activeUpstreams must not get negative: " + remainingUpstreams;
+            if (remainingUpstreams == 0) {
+                Throwable t = failure.get();
+                if (t == null) {
+                    onFinish();
+                } else {
+                    onFail(t);
                 }
-            } catch (AssertionError e) {
-                e.printStackTrace();
             }
         }
     }
@@ -201,11 +201,6 @@ public class RowMergers {
                 rows.add(materializedRow);
             }
             return wantMore;
-        }
-
-        @Override
-        protected void resume(boolean async) {
-            super.resume(async);
         }
 
         @Override
