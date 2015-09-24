@@ -279,7 +279,7 @@ public class JobExecutionContext implements KeepAliveListener {
             if (remove() == RemoveSubContextPosition.LAST){
                 return;
             }
-            LOGGER.trace("onFailure killing all other subContexts..");
+            LOGGER.trace("onFailure killing all other subContexts..", t);
             for (ExecutionSubContext subContext : subContexts.values()) {
                 subContext.kill(t);
             }

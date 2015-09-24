@@ -87,12 +87,12 @@ public class NestedLoopOperation implements RowUpstream {
 
     @Override
     public void pause() {
-        throw new UnsupportedOperationException();
+        right.upstream.pause();
     }
 
     @Override
     public void resume(boolean async) {
-        throw new UnsupportedOperationException();
+        right.upstream.resume(async);
     }
 
     @Override
@@ -245,7 +245,8 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public Set<Requirement> requirements() {
-            return downstream.requirements();
+            //return downstream.requirements();
+            return Requirements.add(downstream.requirements(), Requirement.REPEAT);
         }
     }
 
