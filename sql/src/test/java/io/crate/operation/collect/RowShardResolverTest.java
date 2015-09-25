@@ -28,6 +28,7 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.planner.symbol.InputColumn;
 import io.crate.planner.symbol.Symbol;
 import io.crate.test.integration.CrateUnitTest;
+import org.elasticsearch.common.collect.Tuple;
 import org.junit.Test;
 
 import java.util.List;
@@ -53,22 +54,22 @@ public class RowShardResolverTest extends CrateUnitTest {
     public void testNoPrimaryKeyNoRouting() {
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.<ColumnIdent>of(), ImmutableList.<Symbol>of(), null, null);
-        rowShardResolver.setNextRow(row());
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row());
 
         // auto-generated id, no special routing
-        assertNotNull(rowShardResolver.id());
-        assertNull(rowShardResolver.routing());
+        assertNotNull(idAndRouting.v1());
+        assertNull(idAndRouting.v2());
     }
 
     @Test
     public void testNoPrimaryKeyButRouting() {
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.<ColumnIdent>of(), ImmutableList.<Symbol>of(), ID_IDENT, new InputColumn(1));
-        rowShardResolver.setNextRow(row(1, "hoschi"));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(1, "hoschi"));
 
         // auto-generated id, special routing
-        assertNotNull(rowShardResolver.id());
-        assertThat(rowShardResolver.routing(), is("hoschi"));
+        assertNotNull(idAndRouting.v1());
+        assertThat(idAndRouting.v2(), is("hoschi"));
     }
 
     @Test
@@ -76,11 +77,11 @@ public class RowShardResolverTest extends CrateUnitTest {
         List<Symbol> primaryKeySymbols = ImmutableList.<Symbol>of(new InputColumn(0), new InputColumn(1));
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ci("id"), ci("foo")), primaryKeySymbols, null, null);
-        rowShardResolver.setNextRow(row(1, "hoschi"));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(1, "hoschi"));
 
         // compound encoded id, no special routing
-        assertThat(rowShardResolver.id(), is("AgExBmhvc2NoaQ=="));
-        assertNull(rowShardResolver.routing());
+        assertThat(idAndRouting.v1(), is("AgExBmhvc2NoaQ=="));
+        assertNull(idAndRouting.v2());
     }
 
     @Test
@@ -88,11 +89,11 @@ public class RowShardResolverTest extends CrateUnitTest {
         List<Symbol> primaryKeySymbols = ImmutableList.<Symbol>of(new InputColumn(0), new InputColumn(1));
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ci("id"), ci("foo")), primaryKeySymbols, ci("foo"), new InputColumn(1));
-        rowShardResolver.setNextRow(row(1, "hoschi"));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(1, "hoschi"));
 
         // compound encoded id, special routing
-        assertThat(rowShardResolver.id(), is("AgZob3NjaGkBMQ=="));
-        assertThat(rowShardResolver.routing(), is("hoschi"));
+        assertThat(idAndRouting.v1(), is("AgZob3NjaGkBMQ=="));
+        assertThat(idAndRouting.v2(), is("hoschi"));
     }
 
     @Test
@@ -101,13 +102,13 @@ public class RowShardResolverTest extends CrateUnitTest {
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ci("id"), ci("foo")), primaryKeySymbols, ci("foo"), new InputColumn(1));
 
-        rowShardResolver.setNextRow(row(1, "hoschi"));
-        assertThat(rowShardResolver.id(), is("AgZob3NjaGkBMQ=="));
-        assertThat(rowShardResolver.routing(), is("hoschi"));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(1, "hoschi"));
+        assertThat(idAndRouting.v1(), is("AgZob3NjaGkBMQ=="));
+        assertThat(idAndRouting.v2(), is("hoschi"));
 
-        rowShardResolver.setNextRow(row(2, "galoschi"));
-        assertThat(rowShardResolver.id(), is("AghnYWxvc2NoaQEy"));
-        assertThat(rowShardResolver.routing(), is("galoschi"));
+        Tuple<String, String> idAndRouting2 = rowShardResolver.extractIdAndRouting(row(2, "galoschi"));
+        assertThat(idAndRouting2.v1(), is("AghnYWxvc2NoaQEy"));
+        assertThat(idAndRouting2.v2(), is("galoschi"));
     }
 
     @Test
@@ -115,11 +116,11 @@ public class RowShardResolverTest extends CrateUnitTest {
         List<Symbol> primaryKeySymbols = ImmutableList.<Symbol>of(new InputColumn(2));
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ID_IDENT), primaryKeySymbols, null, new InputColumn(1));
-        rowShardResolver.setNextRow(row(1, "hoschi", null));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(1, "hoschi", null));
 
         // generated _id, special routing
-        assertNotNull(rowShardResolver.id());
-        assertThat(rowShardResolver.routing(), is("hoschi"));
+        assertNotNull(idAndRouting.v1());
+        assertThat(idAndRouting.v2(), is("hoschi"));
     }
 
     @Test
@@ -130,7 +131,7 @@ public class RowShardResolverTest extends CrateUnitTest {
         List<Symbol> primaryKeySymbols = ImmutableList.<Symbol>of(new InputColumn(0));
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ci("id")), primaryKeySymbols, null, null);
-        rowShardResolver.setNextRow(row(new Object[] { null }));
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row(new Object[]{null}));
     }
 
     @Test
@@ -141,6 +142,6 @@ public class RowShardResolverTest extends CrateUnitTest {
         List<Symbol> primaryKeySymbols = ImmutableList.<Symbol>of(new InputColumn(1), new InputColumn(0));
         RowShardResolver rowShardResolver =
                 new RowShardResolver(ImmutableList.of(ci("id"), ci("foo")), primaryKeySymbols, null, new InputColumn(1));
-        rowShardResolver.setNextRow(row(1, null));
+        rowShardResolver.extractIdAndRouting(row(1, null));
     }
 }

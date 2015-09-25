@@ -79,11 +79,12 @@ public class Rows implements Iterable<Row>, Streamable {
         streamed = true;
         int columnSize = in.readVInt();
         dataTypes = new DataType[columnSize];
-        columnIndicesMap = new HashMap<>(columnSize);
         for (int i = 0; i < columnSize; i++) {
             dataTypes[i] = DataTypes.fromStream(in);
         }
-        for (int i = 0; i < columnSize; i++) {
+        int mapSize = in.readVInt();
+        columnIndicesMap = new HashMap<>(mapSize);
+        for (int i = 0; i < mapSize; i++) {
             columnIndicesMap.put(in.readVInt(), in.readVInt());
         }
         int rowsSize = in.readVInt();
@@ -101,12 +102,13 @@ public class Rows implements Iterable<Row>, Streamable {
         for (DataType dataType : dataTypes) {
             DataTypes.toStream(dataType, out);
         }
+        out.writeVInt(columnIndicesMap.size());
         for (Map.Entry<Integer, Integer> entry : columnIndicesMap.entrySet()) {
             out.writeVInt(entry.getKey());
             out.writeVInt(entry.getValue());
         }
         out.writeVInt(entries.size());
-        for (Row row : this) {
+        for (Row row : entries) {
             ((Entry) row).writeTo(out);
         }
     }

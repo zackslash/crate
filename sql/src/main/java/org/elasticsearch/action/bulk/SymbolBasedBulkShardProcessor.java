@@ -63,6 +63,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SymbolBasedBulkShardProcessor<Request extends BulkProcessorRequest, Response extends BulkProcessorResponse<?>> {
 
     public static final int MAX_CREATE_INDICES_BULK_SIZE = 100;
+    public static final int MAX_RETRIES = 100;
 
     private final boolean autoCreateIndices;
     private final Predicate<String> shouldAutocreateIndexPredicate;
@@ -292,7 +293,7 @@ public class SymbolBasedBulkShardProcessor<Request extends BulkProcessorRequest,
 
                     @Override
                     public void onFailure(Throwable e) {
-                        processFailure(e, shardId, request, false);
+                        processFailure(e, shardId, request, 0);
                     }
                 });
                 it.remove();
@@ -442,7 +443,7 @@ public class SymbolBasedBulkShardProcessor<Request extends BulkProcessorRequest,
         trace("response executed.");
     }
 
-    private void processFailure(Throwable e, final ShardId shardId, final Request request, boolean repeatingRetry) {
+    private void processFailure(Throwable e, final ShardId shardId, final Request request, final int retries) {
         trace("execute failure");
         e = Exceptions.unwrap(e);
         BulkRetryCoordinator coordinator;
@@ -452,9 +453,9 @@ public class SymbolBasedBulkShardProcessor<Request extends BulkProcessorRequest,
             setFailure(coordinatorException);
             return;
         }
-        if (e instanceof EsRejectedExecutionException) {
-            LOGGER.trace("{}, retrying", e.getMessage());
-            coordinator.retry(request, requestExecutor, repeatingRetry, new ActionListener<Response>() {
+        if (e instanceof EsRejectedExecutionException && retries < MAX_RETRIES) {
+            LOGGER.trace("{}, retrying #{}", e.getMessage(), retries);
+            coordinator.retry(request, requestExecutor, retries > 0, new ActionListener<Response>() {
                 @Override
                 public void onResponse(Response response) {
                     processResponse(response);
@@ -462,11 +463,11 @@ public class SymbolBasedBulkShardProcessor<Request extends BulkProcessorRequest,
 
                 @Override
                 public void onFailure(Throwable e) {
-                    processFailure(e, shardId, request, true);
+                    processFailure(e, shardId, request, retries+1);
                 }
             });
         } else {
-            if (repeatingRetry) {
+            if (retries > 0) {
                 // release failed retry
                 try {
                     coordinator.retryLock().releaseWriteLock();

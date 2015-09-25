@@ -42,6 +42,7 @@ import org.elasticsearch.action.admin.indices.create.BulkCreateIndicesResponse;
 import org.elasticsearch.action.admin.indices.create.TransportBulkCreateIndicesAction;
 import org.elasticsearch.action.support.AutoCreateIndex;
 import org.elasticsearch.cluster.ClusterService;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.ImmutableSettings;
@@ -54,9 +55,9 @@ import org.elasticsearch.indices.IndexMissingException;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Processor to do Bulk Inserts, similar to {@link BulkProcessor}
@@ -65,9 +66,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * If the Bulk threadPool Queue is full retries are made and
  * the {@link #add} method will start to block.
  */
+@SuppressWarnings("ThrowableResultOfMethodCallIgnored")
 public class BulkShardProcessor<Request extends BulkProcessorRequest, Response extends BulkProcessorResponse<?>> {
 
     public static final int MAX_CREATE_INDICES_BULK_SIZE = 100;
+    public static final int MAX_RETRIES = 100;
+
     public static final AutoCreateIndex AUTO_CREATE_INDEX = new AutoCreateIndex(ImmutableSettings.builder()
             .put("action.auto_create_index", true).build());
 
@@ -84,7 +88,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
     private final AtomicInteger globalCounter = new AtomicInteger(0);
     private final AtomicInteger counter = new AtomicInteger(0);
     private final AtomicInteger pending = new AtomicInteger(0);
-    private final Semaphore executeLock = new Semaphore(1);
+    private final ReentrantLock executeLock = new ReentrantLock();
 
     private final SettableFuture<BitSet> result;
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -154,10 +158,10 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
             return false;
         }
 
-        rowShardResolver.setNextRow(row);
-        ShardId shardId = shardId(indexName, rowShardResolver.id(), rowShardResolver.routing());
+        Tuple<String, String> idAndRouting = rowShardResolver.extractIdAndRouting(row);
+        ShardId shardId = shardId(indexName, idAndRouting.v1(), idAndRouting.v2());
         if (shardId == null) {
-            addRequestForNewIndex(indexName, rowShardResolver.id(), row, rowShardResolver.routing(), version);
+            addRequestForNewIndex(indexName, idAndRouting.v1(), row, idAndRouting.v2(), version);
         } else {
             try {
                 bulkRetryCoordinatorPool.coordinator(shardId).retryLock().acquireReadLock();
@@ -167,7 +171,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
                 setFailure(e);
                 return false;
             }
-            partitionRequestByShard(shardId, rowShardResolver.id(), row, rowShardResolver.routing(), version);
+            partitionRequestByShard(shardId, idAndRouting.v1(), row, idAndRouting.v2(), version);
         }
         executeIfNeeded();
         return true;
@@ -210,7 +214,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
                                          @Nullable String routing,
                                          @Nullable Long version) {
         try {
-            executeLock.acquire();
+            executeLock.lockInterruptibly();
             Request request = requestsByShard.get(shardId);
             if (request == null) {
                 request = bulkRequestBuilder.newRequest(shardId);
@@ -229,7 +233,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
         } catch (InterruptedException e) {
             Thread.interrupted();
         } finally {
-            executeLock.release();
+            executeLock.unlock();
         }
     }
 
@@ -289,7 +293,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
 
     private void executeRequests() {
         try {
-            executeLock.acquire();
+            executeLock.lockInterruptibly();
 
             for (Iterator<Map.Entry<ShardId, Request>> it = requestsByShard.entrySet().iterator(); it.hasNext(); ) {
                 if (failure.get() != null) {
@@ -306,7 +310,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
 
                     @Override
                     public void onFailure(Throwable e) {
-                        processFailure(e, shardId, shardRequest, false);
+                        processFailure(e, shardId, shardRequest, 0);
                     }
                 });
                 it.remove();
@@ -317,7 +321,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
             setFailure(t);
         } finally {
             counter.set(0);
-            executeLock.release();
+            executeLock.unlock();
         }
     }
 
@@ -406,7 +410,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
         setResultIfDone(response.itemIndices().size());
     }
 
-    private void processFailure(Throwable e, final ShardId shardId, final Request request, boolean repeatingRetry) {
+    private void processFailure(Throwable e, final ShardId shardId, final Request request, final int retries) {
         trace("execute failure");
         e = Exceptions.unwrap(e);
         BulkRetryCoordinator coordinator;
@@ -416,13 +420,13 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
             setFailure(t);
             return;
         }
-        if (e instanceof EsRejectedExecutionException) {
-            LOGGER.trace("{}, retrying", e.getMessage());
-            coordinator.retry(request, bulkRequestExecutor, repeatingRetry, new ActionListener<Response>() {
+        if (e instanceof EsRejectedExecutionException && retries < MAX_RETRIES) {
+            LOGGER.trace("{}, retrying #{}", e.getMessage(), retries);
+            coordinator.retry(request, bulkRequestExecutor, retries>0, new ActionListener<Response>() {
 
                 @Override
                 public void onFailure(Throwable e) {
-                    processFailure(e, shardId, request, true);
+                    processFailure(e, shardId, request, retries+1);
                 }
 
                 @Override
@@ -431,7 +435,7 @@ public class BulkShardProcessor<Request extends BulkProcessorRequest, Response e
                 }
             });
         } else {
-            if (repeatingRetry) {
+            if (retries > 0) {
                 // release failed retry
                 try {
                     coordinator.retryLock().releaseWriteLock();

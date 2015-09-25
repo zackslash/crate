@@ -25,6 +25,10 @@ import io.crate.TimestampFormat;
 import io.crate.action.sql.SQLBulkResponse;
 import io.crate.concurrent.Threaded;
 import org.apache.commons.lang3.RandomStringUtils;
+import org.elasticsearch.common.settings.ImmutableSettings;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.junit.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -63,6 +67,7 @@ public class ConcurrentInsertNewPartitionsStressTest extends AbstractIntegration
 
 
     @Threaded(count=4)
+    @TestLogging("action.bulk:DEBUG")
     @Test
     public void testCreateNewPartitionsWithBulkInsert() throws Exception {
         long inserted = 0;
@@ -73,7 +78,7 @@ public class ConcurrentInsertNewPartitionsStressTest extends AbstractIntegration
         for (int i = 0; i < numRows; i++) {
             bulkArgs[i] = getRandomObject();
         }
-        SQLBulkResponse response = execute("insert into motiondata (d, device_id, ts, ax) values (?,?,?,?)", bulkArgs);
+        SQLBulkResponse response = execute("insert into motiondata (d, device_id, ts, ax) values (?,?,?,?)", bulkArgs, TimeValue.timeValueMinutes(10));
         for (SQLBulkResponse.Result result : response.results()) {
             assertThat(result.errorMessage(), is(nullValue()));
             if (result.rowCount() < 0) {

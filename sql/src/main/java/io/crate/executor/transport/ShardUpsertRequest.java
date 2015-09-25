@@ -47,8 +47,6 @@ import java.util.*;
 
 public class ShardUpsertRequest extends ShardReplicationOperationRequest<ShardUpsertRequest> implements Iterable<ShardUpsertRequest.Item>, BulkProcessorRequest {
 
-    private final Item item = new Item();
-
     private int shardId;
     private IntArrayList locations;
     private List<String> ids;
@@ -117,7 +115,7 @@ public class ShardUpsertRequest extends ShardReplicationOperationRequest<ShardUp
         return locations;
     }
 
-    public ShardUpsertRequest add(int location,
+    public synchronized ShardUpsertRequest add(int location,
                                   String id,
                                   Row row,
                                   @Nullable Long version,
@@ -179,6 +177,7 @@ public class ShardUpsertRequest extends ShardReplicationOperationRequest<ShardUp
     @Override
     public Iterator<Item> iterator() {
         return new UnmodifiableIterator<Item>() {
+            private final Item item = new Item();
             private Iterator<IntCursor> locationsIterator = locations.iterator();
             private Iterator<String> idsIterator = ids.iterator();
             private Iterator<Row> rowsIterator = rows.iterator();
@@ -201,7 +200,7 @@ public class ShardUpsertRequest extends ShardReplicationOperationRequest<ShardUp
     }
 
     @Override
-    public void readFrom(StreamInput in) throws IOException {
+    public synchronized void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         shardId = in.readInt();
         routing = in.readOptionalString();

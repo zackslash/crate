@@ -31,6 +31,7 @@ import io.crate.operation.Input;
 import io.crate.planner.symbol.*;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.lucene.BytesRefs;
 
 import java.util.ArrayList;
@@ -57,9 +58,6 @@ public class RowShardResolver {
     private final List<Input<?>> primaryKeyInputs;
     private final Input<?> routingInput;
 
-    private String id;
-    private String routing;
-
 
     public RowShardResolver(List<ColumnIdent> pkColumns,
                             List<Symbol> primaryKeySymbols,
@@ -76,17 +74,18 @@ public class RowShardResolver {
     }
 
 
-    public synchronized boolean setNextRow(Row row) {
+    public Tuple<String, String> extractIdAndRouting(Row row) {
         for (CollectExpression<Row, ?> expression : visitorContext.collectExpressions()) {
             expression.setNextRow(row);
         }
-        id = idFunction.apply(pkValues(primaryKeyInputs));
+        String id = idFunction.apply(pkValues(primaryKeyInputs));
+        String routing;
         if (routingInput == null) {
             routing = null;
         } else {
             routing = BytesRefs.toString(routingInput.value());
         }
-        return true;
+        return new Tuple<>(id, routing);
     }
 
     private List<BytesRef> pkValues(List<Input<?>> primaryKeyInputs) {
@@ -94,21 +93,6 @@ public class RowShardResolver {
             return ImmutableList.of(); // avoid object creation in Lists.transform if the list is empty
         }
         return Lists.transform(primaryKeyInputs, INPUT_BYTES_REF_FUNCTION);
-    }
-
-    /**
-     * Returns the through collected inputs generated id
-     */
-    public String id() {
-        return id;
-    }
-
-    /**
-     * Returns the collected routing value (if available)
-     */
-    @Nullable
-    public String routing() {
-        return routing;
     }
 
     static class Visitor extends SymbolVisitor<ImplementationSymbolVisitor.Context, Input<?>> {
