@@ -180,6 +180,7 @@ public class NestedLoopOperation implements RowUpstream {
             if (otherState == State.FINISHED) {
                 downstream.finish();
             } else {
+                LOGGER.debug("{} finished. Resuming {}", this, otherUpstream);
                 otherUpstream.resume(false);
             }
         }
@@ -194,6 +195,7 @@ public class NestedLoopOperation implements RowUpstream {
             LOGGER.trace("LEFT downstream received a row {}", row);
 
             State rightState = right.state.get();
+            LOGGER.trace("LEFT right state: {}", rightState);
             switch (rightState) {
                 case LEAD_ELECTION:
                     if (leadAcquired.compareAndSet(false, true)) {
@@ -225,6 +227,7 @@ public class NestedLoopOperation implements RowUpstream {
                         state.set(State.PAUSED);
                         return right.resume(rightState);
                     }
+                    LOGGER.trace("LEFT: DONE, return false");
                     return false;
                 default:
                     throw new AssertionError("lead election state should have been handled already");
@@ -245,6 +248,7 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public Set<Requirement> requirements() {
+            //return Requirements.add(downstream.requirements(), Requirement.REPEAT);
             return downstream.requirements();
         }
     }
@@ -266,7 +270,7 @@ public class NestedLoopOperation implements RowUpstream {
 
         @Override
         public boolean setNextRow(final Row rightRow) {
-            LOGGER.trace("RIGHT downstream received a row {}", rightRow);
+            //LOGGER.trace("RIGHT downstream received a row {}", rightRow);
 
             receivedRows = true;
             if (leftIsSuspended) {
@@ -274,11 +278,13 @@ public class NestedLoopOperation implements RowUpstream {
             }
 
             State leftState = left.state.get();
+            LOGGER.trace("RIGHT: left state: {}", leftState);
             switch (leftState) {
                 case LEAD_ELECTION:
                     if (leadAcquired.compareAndSet(false, true)) {
                         lastRow = rightRow;
                         upstream.pause();
+                        LOGGER.trace("RIGHT: pausing", leftState);
                         state.set(State.PAUSED);
                         return true;
                     } else {
@@ -335,6 +341,7 @@ public class NestedLoopOperation implements RowUpstream {
             if (lastRow != null) {
                 boolean wantMore = emitRow(lastRow);
                 if (!wantMore) {
+                    LOGGER.trace("LEFT - right resume - downstream doesn't need more rows, return false");
                     return false;
                 }
                 lastRow = null;
@@ -344,14 +351,18 @@ public class NestedLoopOperation implements RowUpstream {
 
             if (rightState == State.FINISHED) {
                 if (receivedRows) {
+                    LOGGER.trace("repeat right");
                     upstream.repeat();
+                    return true;
                 } else {
+                    LOGGER.trace("LEFT - right resume - right finished and no rows: return false");
                     return false;
                 }
             } else {
-                upstream.resume(false);
+                LOGGER.trace("resume right on {}", upstream);
+                upstream.resume(true);
+                return true;
             }
-            return true;
         }
     }
 

@@ -21,7 +21,9 @@
 
 package io.crate.integrationtests;
 
+import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 
 @ElasticsearchIntegrationTest.ClusterScope(numDataNodes = 1, numClientNodes = 0)
 public class CrossJoinSingleNodeIntegrationTest extends CrossJoinIntegrationTest {
@@ -30,4 +32,11 @@ public class CrossJoinSingleNodeIntegrationTest extends CrossJoinIntegrationTest
      * runs all tests from CrossJoinIntegrationTest but with numDataNodes fixed to always trigger
      * SAME_NODE optimizations
      */
+
+    @Override
+    @Repeat (iterations = 6000)
+    @TestLogging("io.crate:TRACE")
+    public void testCrossJoinFromInformationSchemaTable() throws Exception {
+        super.testCrossJoinFromInformationSchemaTable();
+    }
 }
