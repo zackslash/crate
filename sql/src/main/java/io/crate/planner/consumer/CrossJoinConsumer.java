@@ -31,7 +31,7 @@ import io.crate.analyze.relations.*;
 import io.crate.exceptions.ValidationException;
 import io.crate.metadata.OutputName;
 import io.crate.operation.projectors.TopN;
-import io.crate.planner.distribution.DistributionType;
+import io.crate.planner.distribution.DistributionInfo;
 import io.crate.planner.node.NoopPlannedAnalyzedRelation;
 import io.crate.planner.node.dql.DQLPlanNode;
 import io.crate.planner.node.dql.MergePhase;
@@ -238,7 +238,7 @@ public class CrossJoinConsumer implements Consumer {
                     leftOutputs = leftRelation.querySpec().outputs();
                     leftOrderBy = leftRelation.querySpec().orderBy();
                     leftPlan = consumingPlanner.plan(leftRelation, context);
-                    leftPlan.setDistributionType(DistributionType.SAME_NODE);
+                    leftPlan.setDistributionInfo(DistributionInfo.DEFAULT_SAME_NODE);
                 } else {
                     leftOutputs = new ArrayList<>(leftRelation.querySpec().outputs());
                     leftOutputs.addAll(rightRelation.querySpec().outputs());
@@ -266,7 +266,7 @@ public class CrossJoinConsumer implements Consumer {
                 if (rightMerge != null) {
                     rightMerge.executionNodes(rightPlan.resultNode().executionNodes());
                 } else {
-                    rightPlan.setDistributionType(DistributionType.BROADCAST);
+                    rightPlan.setDistributionInfo(DistributionInfo.DEFAULT_BROADCAST);
                 }
                 NestedLoopPhase nestedLoopPhase = new NestedLoopPhase(
                                 jobId,
@@ -279,7 +279,7 @@ public class CrossJoinConsumer implements Consumer {
                                 getOutputTypes(rightMerge, rightRelation.querySpec().outputs()),
                                 leftPlan.resultNode().executionNodes()
                         );
-                nestedLoopPhase.distributionType(DistributionType.BROADCAST);
+                nestedLoopPhase.distributionInfo(DistributionInfo.DEFAULT_BROADCAST);
                 MergePhase localMerge = localHandlerMerge(
                         context, localExecutionNodes, jobId, leftRelation, rightRelation, leftOutputs, leftOrderBy, nestedLoopPhase);
                 nl = new NestedLoop(jobId, leftPlan, rightPlan, nestedLoopPhase, localMerge, true);
