@@ -21,6 +21,7 @@
 
 package io.crate.planner.consumer;
 
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import io.crate.Constants;
 import io.crate.analyze.OrderBy;
@@ -193,7 +194,7 @@ public class QueryAndFetchConsumer implements Consumer {
                         toCollect,
                         collectPhaseProjections
                 );
-                collectPhase.limit(projectionBuilderContext.limit + projectionBuilderContext.offset);
+                collectPhase.limit(MoreObjects.firstNonNull(projectionBuilderContext.limit, Constants.DEFAULT_SELECT_LIMIT) + projectionBuilderContext.offset);
                 collectPhase.orderBy(projectionBuilderContext.orderBy);
 
                 // MERGE

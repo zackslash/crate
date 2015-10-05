@@ -505,7 +505,7 @@ public class PlannerTest extends CrateUnitTest {
         assertThat(collectPhase.maxRowGranularity(), is(RowGranularity.SHARD));
 
         assertThat(collectPhase.orderBy(), nullValue());
-        assertThat(collectPhase.limit(), nullValue());
+        assertThat(collectPhase.limit(), is(Constants.DEFAULT_SELECT_LIMIT));
 
         List<Projection> projections = collectPhase.projections();
         assertThat(projections.size(), is(1));
